@@ -20,6 +20,8 @@ import water.fvec.Chunk;
 import water.util.Log;
 
 
+import java.io.FileOutputStream;
+import java.io.ObjectOutputStream;
 import java.text.DecimalFormat;
 import java.util.Arrays;
 import java.util.LinkedList;
@@ -27,7 +29,11 @@ import java.util.List;
 
 
 public class FakeGame extends ModelBuilder<FakeGameModel, FakeGameParameters, FakeGameOutput> {
-  @Override public boolean isSupervised() { return true; }
+  @Override
+  public boolean isSupervised() {
+    return true;
+  }
+
   @Override
   public ModelCategory[] can_build() {
     return new ModelCategory[]{
@@ -80,11 +86,7 @@ public class FakeGame extends ModelBuilder<FakeGameModel, FakeGameParameters, Fa
     super.init(expensive);
     if (!isClassifier()) {
       this.hide("_classifier_type", "Classifier type is not used when doing regression");
-      System.out.println(">>>>>>>>>> regression");
-    } else {
-      System.out.println(">>>>>>>>>> classification");
     }
-
   }
 
   // ----------------------
@@ -109,22 +111,12 @@ public class FakeGame extends ModelBuilder<FakeGameModel, FakeGameParameters, Fa
             break;
           }
         }
-        LinkedList<Classifier> cls= (new FakeGameLearner(resp_col, isClassifier())).doAll(_parms.train())._lfg;
-//FIXME: serialize classifier
-        System.out.println(">>>><<<<size>>>><<<< "+cls.size());
-        Classifier c = cls.getFirst();
-        System.out.println("####>1>");
-        ClassifierConfig cc = c.getConfig();
-        System.out.println("####>2>");
-        System.out.println("####>3> "+cc.toString());
+        LinkedList<Classifier> cls = (new FakeGameLearner(resp_col, isClassifier())).doAll(_parms.train())._lfg;
+
         // Fill in the model
         model._output._cls = cls;
         model.update(_job);   // Update model in K/V store
         _job.update(1);       // One unit of work
-
-        StringBuilder sb = new StringBuilder();
-        sb.append("FakeGame: iter: ").append(model._output._iterations);
-        Log.info(sb);
 
       } finally {
         if (model != null) model.unlock(_job);
@@ -141,7 +133,7 @@ public class FakeGame extends ModelBuilder<FakeGameModel, FakeGameParameters, Fa
     int resp_col;
     boolean isClassifier;
     // OUT
-     LinkedList<Classifier> _lfg;
+    LinkedList<Classifier> _lfg;
 
     FakeGameLearner(int resp_col, boolean isClassifier) {
       this.resp_col = resp_col;
@@ -178,7 +170,7 @@ public class FakeGame extends ModelBuilder<FakeGameModel, FakeGameParameters, Fa
       ArrayGameData data = new ArrayGameData(inputVect, target);
 
 
-      if (isClassifier){
+      if (isClassifier) {
         ClassifierModelConfig clc = new ClassifierModelConfig();
         clc.setClassModelsDef(BaseModelsDefinition.UNIFORM);
 
@@ -194,9 +186,9 @@ public class FakeGame extends ModelBuilder<FakeGameModel, FakeGameParameters, Fa
         int outputs = data.getONumber();
         clc.setModelsNumber(outputs);
 
-        Classifier c =  ClassifierFactory.createNewClassifier(clc,data, true);
+        Classifier c = ClassifierFactory.createNewClassifier(clc, data, true);
 
-
+/*
         System.out.println(((ConnectableClassifier) c).toEquation());
         DecimalFormat formater = new DecimalFormat("#.#");
         double err = 0;
@@ -211,21 +203,24 @@ public class FakeGame extends ModelBuilder<FakeGameModel, FakeGameParameters, Fa
           }
           outs += ")";
           System.out.println("props[out|target]:" + outs + "class predicted:" + ((ConnectableClassifier) c).getOutput());
-          */
+          /*/
+        /*
           for (int i = 0; i < data.getONumber(); i++) {
             err += Math.pow(out[i] - data.getTargetOutput(i), 2);
 
           }
         }
         System.out.println("Overall RMS Error: " + Math.sqrt(err / data.getInstanceNumber()));
-
-
+*/
         _lfg.add(c);
       }
     }
 
     @Override
     public void reduce(FakeGameLearner mrt) {
+      if (mrt._lfg.size() >0 && this._lfg != mrt._lfg)
+        Log.debug("FakeGame reducing "+_lfg.size()+" + "+mrt._lfg.size());
+
       _lfg.addAll(mrt._lfg);
     }
   }

@@ -18,9 +18,9 @@ public class FakeGameModel extends Model<FakeGameModel,FakeGameModel.FakeGamePar
   }
 
   public static class FakeGameOutput extends Model.Output {
-    // Iterations executed
-    public int _iterations;
+
     public LinkedList<Classifier> _cls;
+
     public FakeGameOutput( FakeGame b ) { super(b); }
     @Override public ModelCategory getModelCategory() {
       if (isClassifier()){
@@ -36,7 +36,6 @@ public class FakeGameModel extends Model<FakeGameModel,FakeGameModel.FakeGamePar
 
   @Override
   public ModelMetrics.MetricBuilder makeMetricBuilder(String[] domain) {
-    System.out.println("<>>>>>>>>>>>>>>>>>>>>>>>> makeMetricBuilder");
     switch(_output.getModelCategory()) {
       case Binomial:    return new ModelMetricsBinomial.MetricBuilderBinomial(domain);
       case Multinomial: return new ModelMetricsMultinomial.MetricBuilderMultinomial(domain.length,domain);
@@ -45,8 +44,6 @@ public class FakeGameModel extends Model<FakeGameModel,FakeGameModel.FakeGamePar
   }
 
   @Override protected double[] score0(double data[/*ncols*/], double preds[/*nclasses+1*/]) {
-    System.out.println("<>>>>>>>>>>>>>>>>>>>>>>>> SCORE0");
-
     for (int i = 0; i < _output.nclasses()+1; i++) {
       preds[i] = 0.0;
     }

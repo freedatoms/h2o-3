@@ -9,8 +9,7 @@ public class FakeGameModelV3 extends ModelSchema<FakeGameModel, FakeGameModelV3,
 
   public static final class FakeGameModelOutputV3 extends ModelOutputSchema<FakeGameModel.FakeGameOutput, FakeGameModelOutputV3> {
     // Output fields
-    @API(help="Iterations executed") public int iterations;
-    @API(help="") public double[] maxs;
+
   } // FakeGameModelOutputV2
 
 
