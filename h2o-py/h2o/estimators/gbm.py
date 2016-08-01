@@ -203,7 +203,7 @@ class H2OGradientBoostingEstimator(H2OEstimator):
 
       max_abs_leafnode_pred : float
         Maximum absolute value of a leaf node prediction
-        Default: 1.79769313486e+308
+        Default: 1.7976931348623157e+308
 
     """
     def __init__(self, **kwargs):

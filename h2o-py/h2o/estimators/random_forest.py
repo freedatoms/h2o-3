@@ -153,7 +153,7 @@ class H2ORandomForestEstimator(H2OEstimator):
 
       sample_rate : float
         Row sample rate per tree (from 0.0 to 1.0)
-        Default: 0.632000029087
+        Default: 0.6320000290870667
 
       sample_rate_per_class : list(float)
         Row sample rate per tree per class (from 0.0 to 1.0)

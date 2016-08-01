@@ -9,6 +9,7 @@ import hex.ModelBuilder;
 import hex.ModelCategory;
 import hex.fakegame.FakeGameModel.FakeGameOutput;
 import hex.fakegame.FakeGameModel.FakeGameParameters;
+import org.apache.commons.lang.NotImplementedException;
 import water.MRTask;
 import water.Scope;
 import water.fvec.Chunk;
@@ -66,7 +67,7 @@ public class FakeGame extends ModelBuilder<FakeGameModel, FakeGameParameters, Fa
   // ----------------------
   private class FakeGameDriver extends Driver {
     @Override
-    public void compute2() {
+    public void computeImpl() {
       FakeGameModel model = null;
       try {
         Scope.enter();
@@ -149,54 +150,11 @@ public class FakeGame extends ModelBuilder<FakeGameModel, FakeGameParameters, Fa
 
       if (isClassifier) {
         StringReader sr = new StringReader(classifier_config);
-
-
         CfgTemplate cfg = ConfigurationFactory.readConfiguration(sr);
-
-/*
-        ClassifierModelConfig clc = new ClassifierModelConfig();
-        clc.setClassModelsDef(BaseModelsDefinition.UNIFORM);
-
-        PolynomialModelConfig smci;
-        smci = new PolynomialModelConfig();
-        smci.setTrainerClassName("QuasiNewtonTrainer");
-        smci.setTrainerCfg(new QuasiNewtonConfig());
-        smci.setMaxDegree(5);
-        clc.addClassModelCfg(smci);
-
-        clc.setDescription("Polynomial classifier with max degree 5");
-
-        int outputs = data.getONumber();
-        clc.setModelsNumber(outputs);
-        */
-
         Classifier c = ClassifierFactory.createNewClassifier(cfg, data, true);
-
-/*
-        System.out.println(((ConnectableClassifier) c).toEquation());
-        DecimalFormat formater = new DecimalFormat("#.#");
-        double err = 0;
-        for (int j = 0; j < data.getInstanceNumber(); j++) {
-          data.publishVector(j);
-          double[] out = ((ConnectableClassifier) c).getOutputProbabilities();
-          /*String outs = "{";
-          for (int i = 0; i < data.getONumber(); i++) {
-            String o = formater.format(out[i]);
-            String d = formater.format(data.getTargetOutput(i));
-            outs += "[" + o + "|" + d + "]";
-          }
-          outs += ")";
-          System.out.println("props[out|target]:" + outs + "class predicted:" + ((ConnectableClassifier) c).getOutput());
-          /*/
-        /*
-          for (int i = 0; i < data.getONumber(); i++) {
-            err += Math.pow(out[i] - data.getTargetOutput(i), 2);
-
-          }
-        }
-        System.out.println("Overall RMS Error: " + Math.sqrt(err / data.getInstanceNumber()));
-*/
         _lfg.add(c);
+      } else {
+        throw new NotImplementedException("regression is not yet implemented");
       }
     }
 

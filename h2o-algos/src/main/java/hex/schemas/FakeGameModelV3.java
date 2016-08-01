@@ -2,15 +2,15 @@ package hex.schemas;
 
 import hex.fakegame.FakeGameModel;
 import water.api.API;
-import water.api.ModelOutputSchema;
-import water.api.ModelSchema;
+import water.api.schemas3.ModelOutputSchemaV3;
+import water.api.schemas3.ModelSchemaV3;
 
-public class FakeGameModelV3 extends ModelSchema<FakeGameModel, FakeGameModelV3, FakeGameModel.FakeGameParameters, FakeGameV3.FakeGameParametersV3, FakeGameModel.FakeGameOutput, FakeGameModelV3.FakeGameModelOutputV3> {
+public class FakeGameModelV3 extends ModelSchemaV3<FakeGameModel, FakeGameModelV3, FakeGameModel.FakeGameParameters, FakeGameV3.FakeGameParametersV3, FakeGameModel.FakeGameOutput, FakeGameModelV3.FakeGameModelOutputV3> {
 
-  public static final class FakeGameModelOutputV3 extends ModelOutputSchema<FakeGameModel.FakeGameOutput, FakeGameModelOutputV3> {
+  public static final class FakeGameModelOutputV3 extends ModelOutputSchemaV3<FakeGameModel.FakeGameOutput, FakeGameModelOutputV3> {
     // Output fields
 
-  } // FakeGameModelOutputV2
+  }
 
 
   //==========================
