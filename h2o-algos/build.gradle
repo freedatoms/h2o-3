@@ -7,7 +7,11 @@ description = "H2O Algorithms"
 
 dependencies {
   compile project(":h2o-core")
-  compile files("../libs/game-0.0.1-SNAPSHOT-package-all.jar")
+  compile files("../libs/game-common-1.0-SNAPSHOT.jar")
+  compile files("../libs/game-configuration-1.0-SNAPSHOT.jar")
+  compile files("../libs/game-data-1.0-SNAPSHOT.jar")
+  compile files("../libs/game-models-1.0-SNAPSHOT.jar")
+  compile files("../libs/game-trainers-1.0-SNAPSHOT.jar")
   testCompile "junit:junit:${junitVersion}"
   testCompile project(path: ":h2o-core", configuration: "testArchives")
   testRuntime("org.easyb:easyb-core:1.4") { transitive = true }

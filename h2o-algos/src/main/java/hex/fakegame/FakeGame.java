@@ -1,14 +1,9 @@
 package hex.fakegame;
 
-import configuration.classifiers.ClassifierConfig;
-import configuration.classifiers.single.ClassifierModelConfig;
-import configuration.game.trainers.QuasiNewtonConfig;
-import configuration.models.ensemble.BaseModelsDefinition;
-import configuration.models.single.PolynomialModelConfig;
+import configuration.CfgTemplate;
+import configuration.ConfigurationFactory;
 import game.classifiers.Classifier;
 import game.classifiers.ClassifierFactory;
-import game.classifiers.ConnectableClassifier;
-import game.data.AbstractGameData;
 import game.data.ArrayGameData;
 import hex.ModelBuilder;
 import hex.ModelCategory;
@@ -19,13 +14,8 @@ import water.Scope;
 import water.fvec.Chunk;
 import water.util.Log;
 
-
-import java.io.FileOutputStream;
-import java.io.ObjectOutputStream;
-import java.text.DecimalFormat;
-import java.util.Arrays;
+import java.io.StringReader;
 import java.util.LinkedList;
-import java.util.List;
 
 
 public class FakeGame extends ModelBuilder<FakeGameModel, FakeGameParameters, FakeGameOutput> {
@@ -49,22 +39,6 @@ public class FakeGame extends ModelBuilder<FakeGameModel, FakeGameParameters, Fa
   }
 
 
-  public enum ClassifierType {
-    ClassifierArbitrating,
-    ClassifierBagging,
-    ClassifierBoosting,
-    ClassifierCascadeGen,
-    ClassifierCascadeGenProb,
-    ClassifierCascading,
-    ClassifierDelegating,
-    ClassifierEnsembleBase,
-    ClassifierEnsemble,
-    ClassifierEvolvableEnsemble,
-    ClassifierGAME,
-    ClassifierStacking,
-    ClassifierStackingProb,
-    ClassifierWeighted
-  }
 
   // Called from Nano thread; start the FakeGame Job on a F/J thread
   public FakeGame(boolean startup_once) {
@@ -103,6 +77,7 @@ public class FakeGame extends ModelBuilder<FakeGameModel, FakeGameParameters, Fa
         model = new FakeGameModel(_job._result, _parms, new FakeGameOutput(FakeGame.this));
         model.delete_and_lock(_job);
 
+
         String[] names = _parms.train()._names;
         int resp_col = 0;
         for (int i = 0; i < names.length; i++) {
@@ -111,7 +86,7 @@ public class FakeGame extends ModelBuilder<FakeGameModel, FakeGameParameters, Fa
             break;
           }
         }
-        LinkedList<Classifier> cls = (new FakeGameLearner(resp_col, isClassifier())).doAll(_parms.train())._lfg;
+        LinkedList<Classifier> cls = (new FakeGameLearner(resp_col, isClassifier(), _parms._classifier_config)).doAll(_parms.train())._lfg;
 
         // Fill in the model
         model._output._cls = cls;
@@ -132,12 +107,14 @@ public class FakeGame extends ModelBuilder<FakeGameModel, FakeGameParameters, Fa
     // IN
     int resp_col;
     boolean isClassifier;
+    String classifier_config;
     // OUT
     LinkedList<Classifier> _lfg;
 
-    FakeGameLearner(int resp_col, boolean isClassifier) {
+    FakeGameLearner(int resp_col, boolean isClassifier, String classifier_cfg) {
       this.resp_col = resp_col;
       this.isClassifier = isClassifier;
+      this.classifier_config = classifier_cfg;
       _lfg = new LinkedList<>();
     }
 
@@ -171,6 +148,12 @@ public class FakeGame extends ModelBuilder<FakeGameModel, FakeGameParameters, Fa
 
 
       if (isClassifier) {
+        StringReader sr = new StringReader(classifier_config);
+
+
+        CfgTemplate cfg = ConfigurationFactory.readConfiguration(sr);
+
+/*
         ClassifierModelConfig clc = new ClassifierModelConfig();
         clc.setClassModelsDef(BaseModelsDefinition.UNIFORM);
 
@@ -185,8 +168,9 @@ public class FakeGame extends ModelBuilder<FakeGameModel, FakeGameParameters, Fa
 
         int outputs = data.getONumber();
         clc.setModelsNumber(outputs);
+        */
 
-        Classifier c = ClassifierFactory.createNewClassifier(clc, data, true);
+        Classifier c = ClassifierFactory.createNewClassifier(cfg, data, true);
 
 /*
         System.out.println(((ConnectableClassifier) c).toEquation());
@@ -218,10 +202,10 @@ public class FakeGame extends ModelBuilder<FakeGameModel, FakeGameParameters, Fa
 
     @Override
     public void reduce(FakeGameLearner mrt) {
-      if (mrt._lfg.size() >0 && this._lfg != mrt._lfg)
-        Log.debug("FakeGame reducing "+_lfg.size()+" + "+mrt._lfg.size());
-
-      _lfg.addAll(mrt._lfg);
+      if (mrt._lfg.size() >0 && this._lfg != mrt._lfg) {
+        Log.debug("FakeGame reducing " + _lfg.size() + " + " + mrt._lfg.size());
+        _lfg.addAll(mrt._lfg);
+      }
     }
   }
 }

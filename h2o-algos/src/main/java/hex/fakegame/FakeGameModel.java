@@ -14,7 +14,7 @@ public class FakeGameModel extends Model<FakeGameModel,FakeGameModel.FakeGamePar
     @Override public String fullName() { return "FakeGame"; }
     @Override public String javaName() { return FakeGameModel.class.getName(); }
     @Override public long progressUnits() { return 1; }
-    public FakeGame.ClassifierType _classifier_type;
+    public String _classifier_config;
   }
 
   public static class FakeGameOutput extends Model.Output {
