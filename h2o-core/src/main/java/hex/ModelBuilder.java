@@ -84,6 +84,7 @@ abstract public class ModelBuilder<M extends Model<M,P,O>, P extends Model.Param
     String base = getClass().getSimpleName().toLowerCase();
     if( ArrayUtils.find(ALGOBASES,base) != -1 )
       throw H2O.fail("Only called once at startup per ModelBuilder, and "+base+" has already been called");
+    // FIXME: this is not thread safe!
     ALGOBASES = Arrays.copyOf(ALGOBASES,ALGOBASES.length+1);
     BUILDERS  = Arrays.copyOf(BUILDERS ,BUILDERS .length+1);
     SCHEMAS   = Arrays.copyOf(SCHEMAS  ,SCHEMAS  .length+1);
@@ -155,6 +156,26 @@ abstract public class ModelBuilder<M extends Model<M,P,O>, P extends Model.Param
     @Override public void onCompletion(CountedCompleter caller) {
       try { dest().get()._output.stopClock(); } catch(Throwable t) {}
     }
+    // Pull the boilerplate out of the computeImpl(), so the algo writer doesn't need to worry about the following:
+    // 1) Scope (unless they want to keep data, then they must call Scope.untrack(Key<Vec>[]))
+    // 2) Train/Valid frame locking and unlocking
+    // 3) calling tryComplete()
+    public void compute2() {
+      boolean exceptional=false;
+      try {
+        Scope.enter();
+        _parms.read_lock_frames(_job); // Fetch & read-lock input frames
+        computeImpl();
+      } catch(Throwable t) {
+        exceptional=true;
+        throw t;
+      } finally {
+        _parms.read_unlock_frames(_job);
+        Scope.exit();
+      }
+      if (!exceptional) tryComplete();
+    }
+    public abstract void computeImpl();
   }
   
   /** Method to launch training of a Model, based on its parameters. */
@@ -163,16 +184,17 @@ abstract public class ModelBuilder<M extends Model<M,P,O>, P extends Model.Param
       throw H2OModelBuilderIllegalArgumentException.makeFromBuilder(this);
     _start_time = System.currentTimeMillis();
     if( !nFoldCV() )
-      return _job.start(trainModelImpl(), _parms.progressUnits());
+      return _job.start(trainModelImpl(), _parms.progressUnits(), _parms._max_runtime_secs);
 
     // cross-validation needs to be forked off to allow continuous (non-blocking) progress bar
     return _job.start(new H2O.H2OCountedCompleter() {
-        @Override
-        public void compute2() {
-          computeCrossValidation();
-          tryComplete();
-        }
-      }, (1/*for all pre-fold work*/+nFoldWork()+1/*for all the post-fold work*/) * _parms.progressUnits());
+                        @Override
+                        public void compute2() {
+                          computeCrossValidation();
+                          tryComplete();
+                        }
+                      },
+            (nFoldWork()+1/*main model*/) * _parms.progressUnits(), _parms._max_runtime_secs);
   }
 
   /** Train a model as part of a larger Job; the Job already exists and has started. */
@@ -202,9 +224,9 @@ abstract public class ModelBuilder<M extends Model<M,P,O>, P extends Model.Param
   }
 
   // Work for each requested fold
-  private int nFoldWork() {
+  protected int nFoldWork() {
     if( _parms._fold_column == null ) return _parms._nfolds;
-    Vec f = train().vec(_parms._fold_column);
+    Vec f = _parms._train.get().vec(_parms._fold_column);
     Vec fc = VecUtils.toCategoricalVec(f);
     int N = fc.domain().length;
     fc.remove();
@@ -218,6 +240,7 @@ abstract public class ModelBuilder<M extends Model<M,P,O>, P extends Model.Param
    */
   public void computeCrossValidation() {
     assert _job.isRunning();    // main Job is still running
+    _job.setReadyForView(false); //wait until the main job starts to let the user inspect the main job
     final Integer N = nFoldWork();
     init(false);
     try {
@@ -228,7 +251,6 @@ abstract public class ModelBuilder<M extends Model<M,P,O>, P extends Model.Param
 
       // Step 2: Make 2*N binary weight vectors
       final Vec[] weights = cv_makeWeights(N,foldAssignment);
-      _job.update(1);           // Did the major pre-fold work
 
       // Step 3: Build N train & validation frames; build N ModelBuilders; error check them all
       ModelBuilder<M, P, O> cvModelBuilders[] = cv_makeFramesAndBuilders(N,weights);
@@ -245,6 +267,8 @@ abstract public class ModelBuilder<M extends Model<M,P,O>, P extends Model.Param
       // Step 6: Combine cross-validation scores; compute main model x-val
       // scores; compute gains/lifts
       cv_mainModelScores(N, mbs, cvModelBuilders);
+      _job.setReadyForView(true);
+      DKV.put(_job);
 
     } finally {
       Scope.exit();
@@ -255,6 +279,7 @@ abstract public class ModelBuilder<M extends Model<M,P,O>, P extends Model.Param
   // TODO: Implement better splitting algo (with Strata if response is
   // categorical), e.g. http://www.lexjansen.com/scsug/2009/Liang_Xie2.pdf
   public Vec cv_AssignFold(int N) {
+    assert(N>=2);
     Vec fold = train().vec(_parms._fold_column);
     if( fold != null ) {
       if( !fold.isInt() ||
@@ -263,7 +288,7 @@ abstract public class ModelBuilder<M extends Model<M,P,O>, P extends Model.Param
         throw new H2OIllegalArgumentException("Fold column must be either categorical or contiguous integers from 0..N-1 or 1..N");
       return fold;
     }
-    final long seed = _parms.nFoldSeed();
+    final long seed = _parms.getOrMakeRealSeed();
     Log.info("Creating " + N + " cross-validation splits with random number seed: " + seed);
     switch( _parms._fold_assignment ) {
     case AUTO:
@@ -371,7 +396,7 @@ abstract public class ModelBuilder<M extends Model<M,P,O>, P extends Model.Param
     Log.info("Building main model.");
     _start_time = System.currentTimeMillis();
     modifyParmsForCrossValidationMainModel(cvModelBuilders); //tell the main model that it shouldn't stop early either
-    H2O.H2OCountedCompleter mainMB = H2O.submitTask(trainModelImpl()); //non-blocking: start the main model
+    H2O.H2OCountedCompleter mainMB = H2O.submitTask(trainModelImpl()); //non-blocking: start the main
     return mainMB;
   }
 
@@ -704,6 +729,9 @@ abstract public class ModelBuilder<M extends Model<M,P,O>, P extends Model.Param
     Frame tr = _parms.train();
     if( tr == null ) { error("_train","Missing training frame: "+_parms._train); return; }
     _train = new Frame(null /* not putting this into KV */, tr._names.clone(), tr.vecs().clone());
+    if( expensive) {
+      _parms.getOrMakeRealSeed();
+    }
     if (_parms._nfolds < 0 || _parms._nfolds == 1) {
       error("_nfolds", "nfolds must be either 0 or >1.");
     }
@@ -746,7 +774,7 @@ abstract public class ModelBuilder<M extends Model<M,P,O>, P extends Model.Param
       if( expensive ) Log.info("Dropping ignored columns: "+Arrays.toString(_parms._ignored_columns));
     }
     // Rebalance train and valid datasets
-    if (expensive && error_count() == 0) {
+    if (expensive && error_count() == 0 && _parms._auto_rebalance) {
       _train = rebalance(_train, false, _result + ".temporary.train");
       _valid = rebalance(_valid, false, _result + ".temporary.valid");
     }
@@ -875,7 +903,7 @@ abstract public class ModelBuilder<M extends Model<M,P,O>, P extends Model.Param
       error("_stopping_rounds", "Stopping rounds must be >= 0.");
     } else {
       if (isClassifier()) {
-        if (_parms._stopping_metric == ScoreKeeper.StoppingMetric.deviance) {
+        if (_parms._stopping_metric == ScoreKeeper.StoppingMetric.deviance && !getClass().getSimpleName().contains("GLM")) {
           error("_stopping_metric", "Stopping metric cannot be deviance for classification.");
         }
         if (nclasses()!=2 && _parms._stopping_metric == ScoreKeeper.StoppingMetric.AUC) {
@@ -1025,8 +1053,9 @@ abstract public class ModelBuilder<M extends Model<M,P,O>, P extends Model.Param
     {
       Model m = DKV.getGet(cvmodels[0]);
       ModelMetrics mm = m._output._validation_metrics;
-      ConfusionMatrix cm = mm.cm();
+
       if (mm!=null) {
+
         for (Method meth : mm.getClass().getMethods()) {
           if (excluded.contains(meth.getName())) continue;
           try {
@@ -1034,14 +1063,17 @@ abstract public class ModelBuilder<M extends Model<M,P,O>, P extends Model.Param
             methods.add(meth);
           } catch (Exception e) {}
         }
-      }
-      if (cm!=null) {
-        for (Method meth : cm.getClass().getMethods()) {
-          if (excluded.contains(meth.getName())) continue;
-          try {
-            double c = (double) meth.invoke(cm);
-            methods.add(meth);
-          } catch (Exception e) {}
+
+        ConfusionMatrix cm = mm.cm();
+        if (cm!=null) {
+          for (Method meth : cm.getClass().getMethods()) {
+            if (excluded.contains(meth.getName())) continue;
+            try {
+              double c = (double) meth.invoke(cm);
+              methods.add(meth);
+            } catch (Exception e) {
+            }
+          }
         }
       }
     }

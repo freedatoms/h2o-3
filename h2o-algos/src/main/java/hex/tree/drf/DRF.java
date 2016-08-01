@@ -9,6 +9,7 @@ import hex.tree.DTree.UndecidedNode;
 import water.Job;
 import water.Key;
 import water.MRTask;
+import water.fvec.C0DChunk;
 import water.fvec.Chunk;
 import water.fvec.Frame;
 import java.util.Random;
@@ -40,6 +41,7 @@ public class DRF extends SharedTree<hex.tree.drf.DRFModel, hex.tree.drf.DRFModel
   /** Start the DRF training Job on an F/J thread. */
   @Override protected Driver trainModelImpl() { return new DRFDriver(); }
 
+  @Override public boolean scoreZeroTrees() { return false; }
 
   /** Initialize the ModelBuilder, validating all arguments and preparing the
    *  training frame.  This call is expected to be overridden in the subclasses
@@ -61,8 +63,8 @@ public class DRF extends SharedTree<hex.tree.drf.DRFModel, hex.tree.drf.DRFModel
       if (_nclass == 1) _parms._distribution = Distribution.Family.gaussian;
       if (_nclass >= 2) _parms._distribution = Distribution.Family.multinomial;
     }
-    if (_parms._sample_rate == 1f && _valid == null)
-      error("_sample_rate", "Sample rate is 100% and no validation dataset is specified.  There are no OOB data to compute out-of-bag error estimation!");
+    if (_parms._sample_rate == 1f && _valid == null && _parms._nfolds == 0)
+      warn("_sample_rate", "Sample rate is 100% and no validation dataset and no cross-validation. There are no out-of-bag data to compute error estimates on the training data!");
     if (hasOffsetCol())
       error("_offset_column", "Offsets are not yet supported for DRF.");
     if (hasOffsetCol() && isClassifier()) {
@@ -132,7 +134,7 @@ public class DRF extends SharedTree<hex.tree.drf.DRFModel, hex.tree.drf.DRFModel
 
     // --------------------------------------------------------------------------
     // Build the next random k-trees representing tid-th tree
-    @Override protected void buildNextKTrees() {
+    @Override protected boolean buildNextKTrees() {
       // We're going to build K (nclass) trees - each focused on correcting
       // errors for a single class.
       final DTree[] ktrees = new DTree[_nclass];
@@ -151,6 +153,8 @@ public class DRF extends SharedTree<hex.tree.drf.DRFModel, hex.tree.drf.DRFModel
 
       // Grow the model by K-trees
       _model._output.addKTrees(ktrees);
+
+      return false; //never stop early
     }
 
     // Assumes that the "Work" column are filled with horizontalized (0/1) class memberships per row (or copy of regression response)
@@ -172,15 +176,15 @@ public class DRF extends SharedTree<hex.tree.drf.DRFModel, hex.tree.drf.DRFModel
           // This optimization assumes the 2nd tree of a 2-class system is the
           // inverse of the first (and that the same columns were picked)
           if( k==1 && _nclass==2 && _model.binomialOpt()) continue;
-          ktrees[k] = new DTree(_train, _ncols, (char)_parms._nbins, (char)_parms._nbins_cats, (char)_nclass, _parms._min_rows, _mtry, _mtry_per_tree, rseed);
-          new UndecidedNode(ktrees[k], -1, DHistogram.initialHist(_train, _ncols, adj_nbins, _parms._nbins_cats, hcs[k][0])); // The "root" node
+          ktrees[k] = new DTree(_train, _ncols, (char)_nclass, _mtry, _mtry_per_tree, rseed, _parms);
+          new UndecidedNode(ktrees[k], -1, DHistogram.initialHist(_train, _ncols, adj_nbins, hcs[k][0], rseed, _parms, getGlobalQuantilesKeys())); // The "root" node
         }
       }
 
       // Sample - mark the lines by putting 'OUT_OF_BAG' into nid(<klass>) vector
       Sample ss[] = new Sample[_nclass];
       for( int k=0; k<_nclass; k++)
-        if (ktrees[k] != null) ss[k] = new Sample(ktrees[k], _parms._sample_rate).dfork(null,new Frame(vec_nids(_train,k),vec_resp(_train)), _parms._build_tree_one_node);
+        if (ktrees[k] != null) ss[k] = new Sample(ktrees[k], _parms._sample_rate, _parms._sample_rate_per_class).dfork(null,new Frame(vec_nids(_train,k),vec_resp(_train)), _parms._build_tree_one_node);
       for( int k=0; k<_nclass; k++)
         if( ss[k] != null ) ss[k].getResult();
 
@@ -189,7 +193,7 @@ public class DRF extends SharedTree<hex.tree.drf.DRFModel, hex.tree.drf.DRFModel
       // Adds a layer to the trees each pass.
       int depth=0;
       for( ; depth<_parms._max_depth; depth++ ) {
-        hcs = buildLayer(_train, _parms._nbins, _parms._nbins_cats, ktrees, leafs, hcs, _mtry < _model._output.nfeatures(), _parms._build_tree_one_node);
+        hcs = buildLayer(_train, _parms._nbins, _parms._nbins_cats, ktrees, leafs, hcs, _parms._build_tree_one_node);
         // If we did not make any new splits, then the tree is split-to-death
         if( hcs == null ) break;
       }
@@ -203,7 +207,7 @@ public class DRF extends SharedTree<hex.tree.drf.DRFModel, hex.tree.drf.DRFModel
         for( int nid=0; nid<leaf; nid++ ) {
           if( tree.node(nid) instanceof DecidedNode ) {
             DecidedNode dn = tree.decided(nid);
-            if( dn._split._col == -1 ) { // No decision here, no row should have this NID now
+            if( dn._split == null ) { // No decision here, no row should have this NID now
               if( nid==0 ) {               // Handle the trivial non-splitting tree
                 LeafNode ln = new LeafNode(tree, -1, 0);
                 ln._pred = (float)(isClassifier() ? _model._output._priorClassDist[k] : _initialPrediction);
@@ -215,7 +219,7 @@ public class DRF extends SharedTree<hex.tree.drf.DRFModel, hex.tree.drf.DRFModel
               if( cnid == -1 || // Bottomed out (predictors or responses known constant)
                       tree.node(cnid) instanceof UndecidedNode || // Or chopped off for depth
                       (tree.node(cnid) instanceof DecidedNode &&  // Or not possible to split
-                              ((DecidedNode)tree.node(cnid))._split.col()==-1) ) {
+                              ((DecidedNode)tree.node(cnid))._split==null) ) {
                 LeafNode ln = new LeafNode(tree,nid);
                 ln._pred = (float)dn.pred(i);  // Set prediction into the leaf
                 dn._nids[i] = ln.nid(); // Mark a leaf here
@@ -230,8 +234,8 @@ public class DRF extends SharedTree<hex.tree.drf.DRFModel, hex.tree.drf.DRFModel
     private class CollectPreds extends MRTask<CollectPreds> {
       /* @IN  */ final DTree _trees[]; // Read-only, shared (except at the histograms in the Nodes)
       /* @IN */  double _threshold;      // Sum of squares for this tree only
-      /* @OUT */ long rightVotes; // number of right votes over OOB rows (performed by this tree) represented by DTree[] _trees
-      /* @OUT */ long allRows;    // number of all OOB rows (sampled by this tree)
+      /* @OUT */ double rightVotes; // number of right votes over OOB rows (performed by this tree) represented by DTree[] _trees
+      /* @OUT */ double allRows;    // number of all OOB rows (sampled by this tree)
       /* @OUT */ float sse;      // Sum of squares for this tree only
       CollectPreds(DTree trees[], int leafs[], double threshold) { _trees=trees; _threshold = threshold; }
       final boolean importance = true;
@@ -240,56 +244,59 @@ public class DRF extends SharedTree<hex.tree.drf.DRFModel, hex.tree.drf.DRFModel
         final double[] rpred   = importance ? new double[1+_nclass] : null; // Row prediction
         final double[] rowdata = importance ? new double[_ncols] : null; // Pre-allocated row data
         final Chunk   oobt  = chk_oobt(chks); // Out-of-bag rows counter over all trees
+        final Chunk   weights  = hasWeightCol() ? chk_weight(chks) : new C0DChunk(1, chks[0]._len); // Out-of-bag rows counter over all trees
         // Iterate over all rows
         for( int row=0; row<oobt._len; row++ ) {
+          double weight = weights.atd(row);
           final boolean wasOOBRow = ScoreBuildHistogram.isOOBRow((int)chk_nids(chks,0).at8(row));
-
           // For all tree (i.e., k-classes)
           for( int k=0; k<_nclass; k++ ) {
-            final DTree tree = _trees[k];
-            if( tree == null ) continue; // Empty class is ignored
             final Chunk nids = chk_nids(chks, k); // Node-ids  for this tree/class
-            int nid = (int)nids.at8(row);         // Get Node to decide from
-            // Update only out-of-bag rows
-            // This is out-of-bag row - but we would like to track on-the-fly prediction for the row
-            if( wasOOBRow) {
-              final Chunk ct   = chk_tree(chks,k); // k-tree working column holding votes for given row
-              nid = ScoreBuildHistogram.oob2Nid(nid);
-              if( tree.node(nid) instanceof UndecidedNode ) // If we bottomed out the tree
-                nid = tree.node(nid).pid();                 // Then take parent's decision
-              int leafnid;
-              if( tree.root() instanceof LeafNode ) {
-                leafnid = 0;
-              } else {
-                DecidedNode dn = tree.decided(nid);           // Must have a decision point
-                if (dn._split.col() == -1)     // Unable to decide?
-                  dn = tree.decided(tree.node(nid).pid());    // Then take parent's decision
-                leafnid = dn.ns(chks, row); // Decide down to a leafnode
+            if (weight!=0) {
+              final DTree tree = _trees[k];
+              if (tree == null) continue; // Empty class is ignored
+              int nid = (int) nids.at8(row);         // Get Node to decide from
+              // Update only out-of-bag rows
+              // This is out-of-bag row - but we would like to track on-the-fly prediction for the row
+              if (wasOOBRow) {
+                final Chunk ct = chk_tree(chks, k); // k-tree working column holding votes for given row
+                nid = ScoreBuildHistogram.oob2Nid(nid);
+                if (tree.node(nid) instanceof UndecidedNode) // If we bottomed out the tree
+                  nid = tree.node(nid).pid();                 // Then take parent's decision
+                int leafnid;
+                if (tree.root() instanceof LeafNode) {
+                  leafnid = 0;
+                } else {
+                  DecidedNode dn = tree.decided(nid);           // Must have a decision point
+                  if (dn._split == null)     // Unable to decide?
+                    dn = tree.decided(tree.node(nid).pid());    // Then take parent's decision
+                  leafnid = dn.getChildNodeID(chks, row); // Decide down to a leafnode
+                }
+                // Setup Tree(i) - on the fly prediction of i-tree for row-th row
+                //   - for classification: cumulative number of votes for this row
+                //   - for regression: cumulative sum of prediction of each tree - has to be normalized by number of trees
+                double prediction = ((LeafNode) tree.node(leafnid)).pred(); // Prediction for this k-class and this row
+                if (importance) rpred[1 + k] = (float) prediction; // for both regression and classification
+                ct.set(row, (float) (ct.atd(row) + prediction));
               }
-              // Setup Tree(i) - on the fly prediction of i-tree for row-th row
-              //   - for classification: cumulative number of votes for this row
-              //   - for regression: cumulative sum of prediction of each tree - has to be normalized by number of trees
-              double prediction = ((LeafNode) tree.node(leafnid)).pred(); // Prediction for this k-class and this row
-              if (importance) rpred[1 + k] = (float) prediction; // for both regression and classification
-              ct.set(row, (float) (ct.atd(row) + prediction));
             }
             // reset help column for this row and this k-class
             nids.set(row, 0);
           } /* end of k-trees iteration */
           // For this tree this row is out-of-bag - i.e., a tree voted for this row
-          if (wasOOBRow) oobt.set(row, oobt.atd(row) + 1); // track number of trees
-          if (importance) {
+          if (wasOOBRow) oobt.set(row, oobt.atd(row) + weight); // track number of trees
+          if (importance && weight!=0) {
             if (wasOOBRow && !y.isNA(row)) {
               if (isClassifier()) {
                 int treePred = getPrediction(rpred, _model._output._priorClassDist, data_row(chks, row, rowdata), _threshold);
                 int actuPred = (int) y.at8(row);
-                if (treePred==actuPred) rightVotes++; // No miss !
+                if (treePred==actuPred) rightVotes+=weight; // No miss !
               } else { // regression
                 double treePred = rpred[1];
                 double actuPred = y.atd(row);
                 sse += (actuPred-treePred)*(actuPred-treePred);
               }
-              allRows++;
+              allRows+=weight;
             }
           }
         }
@@ -316,16 +323,16 @@ public class DRF extends SharedTree<hex.tree.drf.DRFModel, hex.tree.drf.DRFModel
     double sum = 0;
     if (_nclass > 2 || (_nclass == 2 && !_model.binomialOpt())) {
       for (int k = 0; k < _nclass; k++)
-        sum += (fs[k+1] = chk_tree(chks, k).atd(row) / chk_oobt(chks).atd(row));
+        sum += (fs[k+1] = weight * chk_tree(chks, k).atd(row) / chk_oobt(chks).atd(row));
     }
     else if (_nclass==2 && _model.binomialOpt()) {
-      fs[1] = chk_tree(chks, 0).atd(row) / chk_oobt(chks).atd(row);
+      fs[1] = weight * chk_tree(chks, 0).atd(row) / chk_oobt(chks).atd(row);
       assert(fs[1] >= 0 && fs[1] <= 1);
       fs[2] = 1. - fs[1];
     }
     else { //regression
       // average per trees voted for this row (only trees which have row in "out-of-bag"
-      sum += (fs[0] = chk_tree(chks, 0).atd(row) / chk_oobt(chks).atd(row) );
+      sum += (fs[0] = weight * chk_tree(chks, 0).atd(row) / chk_oobt(chks).atd(row) );
       fs[1] = 0;
     }
     return sum;

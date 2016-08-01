@@ -1,7 +1,6 @@
 package water.util;
 
 import water.AutoBuffer;
-import water.H2O;
 import water.Iced;
 import water.IcedWrapper;
 
@@ -162,12 +161,16 @@ public class TwoDimTable extends Iced {
             set(r, c, dblCellValues[r][c]);
           break;
         case "int":
-          for (int r = 0; r < rowDim; ++r)
-            set(r, c, (int) dblCellValues[r][c]);
-          break;
         case "long":
-          for (int r = 0; r < rowDim; ++r)
-            set(r, c, (long) dblCellValues[r][c]);
+          for (int r = 0; r < rowDim; ++r) {
+            double val = dblCellValues[r][c];
+            if (isEmpty(val))
+              set(r, c, Double.NaN);
+            else if ((long)val==val)
+              set(r, c, (long)val);
+            else
+              set(r, c, val);
+          }
           break;
         case "string":
           for (int r = 0; r < rowDim; ++r)
@@ -222,19 +225,12 @@ public class TwoDimTable extends Iced {
    * @param o Object value
    */
   public void set(final int row, final int col, final Object o) {
-    if (o == null) {
-      cellValues[row][col] = null;
-      return;
-    }
-
-    if (colTypes[col].equals("double"))
-      cellValues[row][col] = new IcedWrapper(new Double(o.toString()));
-    else if (colTypes[col].equals("float"))
-      cellValues[row][col] = new IcedWrapper(new Float(o.toString()));
-    else if (colTypes[col].equals("int"))
-      cellValues[row][col] = new IcedWrapper(new Integer(o.toString()));
-    else if (colTypes[col].equals("long"))
-      cellValues[row][col] = new IcedWrapper(new Long(o.toString()));
+    if (o == null)
+      cellValues[row][col] = new IcedWrapper(null);
+    else if (o instanceof Double && Double.isNaN((double)o))
+      cellValues[row][col] = new IcedWrapper(Double.NaN);
+    else if (colTypes[col]=="string")
+      cellValues[row][col] = new IcedWrapper(o.toString());
     else
       cellValues[row][col] = new IcedWrapper(o);
   }
@@ -297,23 +293,25 @@ public class TwoDimTable extends Iced {
       row = 0;
       for (int r = 0; r < rowDim; ++r) {
         if (!full && skip(r)) continue;
-        switch (colTypes[c]) {
-          case "double":
-            cellStrings[row + 1][c + 1] = get(r,c) == null || isEmpty((Double)get(r,c)) ? "" : String.format(formatString, (Double)cellValues[r][c].get());
-            break;
-          case "float":
-            cellStrings[row + 1][c + 1] = get(r,c) == null ? "" : String.format(formatString, (Float)cellValues[r][c].get());
-            break;
-          case "int":
-            cellStrings[row + 1][c + 1] = get(r,c) == null ? "" : String.format(formatString, (Integer)cellValues[r][c].get());
-            break;
-          case "long":
-            cellStrings[row + 1][c + 1] = get(r,c) == null ? "" : String.format(formatString, (Long)cellValues[r][c].get());
-            break;
-          default:
-            if( get(r,c) != null )
-              cellStrings[row+1][c+1] = String.format(formatString, cellValues[r][c]);
-            break;
+        Object o = get(r,c);
+        if ((o == null) || o instanceof Double && isEmpty((double)o)){
+          cellStrings[row + 1][c + 1] = "";
+          row++;
+          continue;
+        } else if (o instanceof Double && Double.isNaN((double)o)) {
+          cellStrings[row + 1][c + 1] = "NaN";
+          row++;
+          continue;
+        }
+        try {
+          if (o instanceof Double) cellStrings[row + 1][c + 1] = String.format(formatString, (Double) o);
+          else if (o instanceof Float) cellStrings[row + 1][c + 1] = String.format(formatString, (Float) o);
+          else if (o instanceof Integer) cellStrings[row + 1][c + 1] = String.format(formatString, (Integer) o);
+          else if (o instanceof Long) cellStrings[row + 1][c + 1] = String.format(formatString, (Long) o);
+          else if (o instanceof String) cellStrings[row + 1][c + 1] = (String)o;
+          else cellStrings[row + 1][c + 1] = String.format(formatString, cellValues[r][c]);
+        } catch(Throwable t) {
+          cellStrings[row + 1][c + 1] = o.toString();
         }
         row++;
       }

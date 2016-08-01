@@ -1,12 +1,16 @@
 package water;
 
-import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.assertFalse;
 import org.junit.BeforeClass;
 import org.junit.Test;
-import water.api.Schema;
-import water.api.TwoDimTableBase;
+import water.api.schemas3.TwoDimTableV3;
+import water.fvec.Frame;
+import water.parser.ParseDataset;
+import water.parser.ParserTest;
 import water.util.Log;
 import water.util.TwoDimTable;
+
+import static org.junit.Assert.assertTrue;
 import static water.util.TwoDimTable.emptyDouble;
 
 public class TwoDimTableTest extends TestUtil {
@@ -36,7 +40,7 @@ public class TwoDimTableTest extends TestUtil {
     assertTrue(ts.length() > 0);
     Log.info(ts);
 
-    String json = new TwoDimTableBase().fillFromImpl(table).toJsonString();
+    String json = new TwoDimTableV3().fillFromImpl(table).toJsonString();
     Log.info(json);
   }
 
@@ -64,7 +68,7 @@ public class TwoDimTableTest extends TestUtil {
     assertTrue(ts.length() > 0);
     Log.info(ts);
 
-    String json = new TwoDimTableBase().fillFromImpl(table).toJsonString();
+    String json = new TwoDimTableV3().fillFromImpl(table).toJsonString();
     Log.info(json);
   }
 
@@ -114,7 +118,7 @@ public class TwoDimTableTest extends TestUtil {
     assertTrue(ts.length() > 0);
     Log.info(ts);
 
-    String json = new TwoDimTableBase().fillFromImpl(table).toJsonString();
+    String json = new TwoDimTableV3().fillFromImpl(table).toJsonString();
     Log.info(json);
   }
 
@@ -137,7 +141,7 @@ public class TwoDimTableTest extends TestUtil {
     assertTrue(ts.length() > 0);
     Log.info(ts);
 
-    String json = new TwoDimTableBase().fillFromImpl(table).toJsonString();
+    String json = new TwoDimTableV3().fillFromImpl(table).toJsonString();
     Log.info(json);
   }
 
@@ -160,7 +164,7 @@ public class TwoDimTableTest extends TestUtil {
     assertTrue(ts.length() > 0);
     Log.info(ts);
 
-    String json = new TwoDimTableBase().fillFromImpl(table).toJsonString();
+    String json = new TwoDimTableV3().fillFromImpl(table).toJsonString();
     Log.info(json);
   }
 
@@ -184,10 +188,10 @@ public class TwoDimTableTest extends TestUtil {
     Log.info(ts);
 
     assertTrue(table.get(3, 0).equals("a30"));
-    assertTrue(table.get(1, 2).equals(1.2));
+    assertTrue(table.get(1, 2).equals("1.2"));
     assertTrue(table.get(1, 3) == null);
 
-    String json = new TwoDimTableBase().fillFromImpl(table).toJsonString();
+    String json = new TwoDimTableV3().fillFromImpl(table).toJsonString();
     Log.info(json);
 
   }
@@ -204,19 +208,19 @@ public class TwoDimTableTest extends TestUtil {
     table.set(0, 0, Double.NEGATIVE_INFINITY);
     table.set(1, 0, Double.POSITIVE_INFINITY);
     table.set(2, 0, Double.NaN);
-    table.set(3, 0, -Double.NaN);
+    table.set(3, 0, Math.PI);
     table.set(0, 1, Float.NEGATIVE_INFINITY);
     table.set(1, 1, Float.POSITIVE_INFINITY);
     table.set(2, 1, Float.NaN);
-    table.set(3, 1, -Float.NaN);
+    table.set(3, 1, Float.MIN_VALUE);
     table.set(0, 2, Integer.MAX_VALUE);
     table.set(1, 2, Integer.MIN_VALUE);
-    table.set(2, 2, 0);
-    table.set(3, 2, -0);
+    table.set(2, 2, Double.NaN);
+    table.set(3, 2, 0);
     table.set(0, 3, Long.MAX_VALUE);
     table.set(1, 3, Long.MIN_VALUE);
-    table.set(2, 3, 0);
-    table.set(3, 3, -0);
+    table.set(2, 3, Double.NaN);
+    table.set(3, 3, null);
 
     String ts = table.toString();
     assertTrue(ts.length() > 0);
@@ -225,21 +229,21 @@ public class TwoDimTableTest extends TestUtil {
     assertTrue(table.get(0, 0).equals(Double.NEGATIVE_INFINITY));
     assertTrue(table.get(1, 0).equals(Double.POSITIVE_INFINITY));
     assertTrue(table.get(2, 0).equals(Double.NaN));
-    assertTrue(table.get(3, 0).equals(-Double.NaN));
+    assertTrue(table.get(3, 0).equals(Math.PI));
     assertTrue(table.get(0, 1).equals(Float.NEGATIVE_INFINITY));
     assertTrue(table.get(1, 1).equals(Float.POSITIVE_INFINITY));
     assertTrue(table.get(2, 1).equals(Float.NaN));
-    assertTrue(table.get(3, 1).equals(-Float.NaN));
+    assertTrue(table.get(3, 1).equals(Float.MIN_VALUE));
     assertTrue(table.get(0, 2).equals(Integer.MAX_VALUE));
     assertTrue(table.get(1, 2).equals(Integer.MIN_VALUE));
-    assertTrue(table.get(2, 2).equals(0));
-    assertTrue(table.get(3, 2).equals(-0));
+    assertTrue(table.get(2, 2).equals(Double.NaN));
+    assertTrue(table.get(3, 2).equals(0));
     assertTrue(table.get(0, 3).equals(Long.MAX_VALUE));
     assertTrue(table.get(1, 3).equals(Long.MIN_VALUE));
-    assertTrue(table.get(2, 3).equals(0L));
-    assertTrue(table.get(3, 3).equals(-0L));
+    assertTrue(table.get(2, 3).equals(Double.NaN));
+    assertTrue(table.get(3, 3) == null);
 
-    String json = new TwoDimTableBase().fillFromImpl(table).toJsonString();
+    String json = new TwoDimTableV3().fillFromImpl(table).toJsonString();
     Log.info(json);
 
   }
@@ -263,8 +267,61 @@ public class TwoDimTableTest extends TestUtil {
     assertTrue(ts.length() > 0);
     Log.info(ts);
 
-    String json = new TwoDimTableBase().fillFromImpl(table).toJsonString();
+    String json = new TwoDimTableV3().fillFromImpl(table).toJsonString();
     Log.info(json);
 
+  }
+
+  @Test public void run9() {
+    Frame fr = null;
+    try {
+      int OFFSET = 5;
+      int firstVal = 1;
+      String data = "1\nNA\n";
+      Key k1 = ParserTest.makeByteVec(data);
+      Key r1 = Key.make();
+      fr = ParseDataset.parse(r1, k1);
+      assertTrue(fr.numRows() == 2);
+      assertTrue(fr.hasNAs());
+      System.out.println(fr);
+      TwoDimTable table = fr.toTwoDimTable(0,2);
+      assertTrue(table.getColTypes()[0]=="long");
+      assertTrue((long) table.get(0 + OFFSET,0) == firstVal);
+      try {
+        long invalid = (long) table.get(1 + OFFSET,0); // NaN can't be cast to a long
+        assertFalse(true);
+      } catch(ClassCastException ex) {}
+      assertTrue(Double.isNaN((double) table.get(1 + OFFSET, 0)));
+    } finally {
+      if (fr != null) fr.delete();
+    }
+  }
+
+  @Test public void run10() {
+    Frame fr = null;
+    try {
+      int OFFSET = 5;
+      String data = "1\n3\n4\nNA\n";
+      Key k1 = ParserTest.makeByteVec(data);
+      Key r1 = Key.make();
+      fr = ParseDataset.parse(r1, k1);
+      assertTrue(fr.numRows() == 4);
+      System.out.println(fr);
+      TwoDimTable table = fr.toTwoDimTable(0,4);
+      assertTrue(table.getColTypes()[0]=="long");
+      assertTrue((long)table.get(0,0) == 1); //min
+      assertTrue((double)table.get(1,0) > 2.66); //mean
+      assertTrue((double)table.get(1,0) < 2.67); //mean
+      assertTrue((double)table.get(2,0) > 1.52); //sd
+      assertTrue((double)table.get(2,0) < 1.53); //sd
+      assertTrue((long)table.get(3,0) == 4); //max
+      assertTrue((long)table.get(4,0) == 1); //missing
+      assertTrue((long)table.get(0 + OFFSET,0) == 1);
+      assertTrue((long)table.get(1 + OFFSET,0) == 3);
+      assertTrue((long)table.get(2 + OFFSET,0) == 4);
+      assertTrue(Double.isNaN((double)table.get(3 + OFFSET,0)));
+    } finally {
+      if (fr != null) fr.delete();
+    }
   }
 }

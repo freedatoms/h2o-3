@@ -18,7 +18,7 @@
       stop("Invalid column names: ", paste(x[!(x %in% cc)], collapse=','))
     x_i <- match(x, cc)
   } else {
-    if(any( x < 1L | x > length(cc)))
+    if(any( x < 1L | x > attr(x,'ncol')))
       stop('out of range explanatory variable ', paste(x[x < 1L | x > length(cc)], collapse=','))
     x_i <- x
     x <- cc[x_i]
@@ -110,13 +110,19 @@
   #---------- Check user parameter types ----------#
   param_values <- .h2o.checkAndUnifyModelParameters(algo = algo, allParams = ALL_PARAMS, params = params)
   #---------- Validate parameters ----------#
-  .h2o.validateModelParameters(algo, param_values, h2oRestApiVersion)
+  #.h2o.validateModelParameters(algo, param_values, h2oRestApiVersion)
   #---------- Build! ----------#
   res <- .h2o.__remoteSend(method = "POST", .h2o.__MODEL_BUILDERS(algo), .params = param_values, h2oRestApiVersion = h2oRestApiVersion)
-
+  if(length(res$messages) != 0L){
+    warn <- lapply(res$messages, function(y) {
+      if(class(y) == "list" && y$message_type == "WARN" )
+        paste0(y$message, ".\n")
+      else ""
+    })
+    if(any(nzchar(warn))) warning(warn)
+  }
   job_key  <- res$job$key$name
   dest_key <- res$job$dest$name
-
   new("H2OModelFuture",job_key=job_key, model_id=dest_key)
 }
 
@@ -127,9 +133,9 @@
 .h2o.validateModelParameters <- function(algo, params, h2oRestApiVersion = .h2o.__REST_API_VERSION) {
   validation <- .h2o.__remoteSend(method = "POST", paste0(.h2o.__MODEL_BUILDERS(algo), "/parameters"), .params = params, h2oRestApiVersion = h2oRestApiVersion)
   if(length(validation$messages) != 0L) {
-    error <- lapply(validation$messages, function(i) {
-      if( i$message_type == "ERRR" )
-        paste0(i$message, ".\n")
+    error <- lapply(validation$messages, function(x) {
+      if( x$message_type == "ERRR" )
+        paste0(x$message, ".\n")
       else ""
     })
     if(any(nzchar(error))) stop(error)
@@ -171,6 +177,7 @@ h2o.getFutureModel <- function(object) {
     args <- .verify_dataxy(params$training_frame, x, y)
     if( !is.null(params$offset_column) && !is.null(params$offset_column))  args$x_ignore <- args$x_ignore[!( params$offset_column == args$x_ignore )]
     if( !is.null(params$weights_column) && !is.null(params$weights_column)) args$x_ignore <- args$x_ignore[!( params$weights_column == args$x_ignore )]
+    if( !is.null(params$fold_column) && !is.null(params$fold_column)) args$x_ignore <- args$x_ignore[!( params$fold_column == args$x_ignore )]
     params$ignored_columns <- args$x_ignore
     params$response_column <- args$y
   } else {
@@ -613,6 +620,72 @@ h2o.auc <- function(object, train=FALSE, valid=FALSE, xval=FALSE) {
     }
   }
   warning(paste0("No AUC for ", class(object)))
+  invisible(NULL)
+}
+
+#' Retrieve the mean per class error
+#'
+#' Retrieves the mean per class error from an \linkS4class{H2OBinomialMetrics}.
+#' If "train", "valid", and "xval" parameters are FALSE (default), then the training mean per class error value is returned. If more
+#' than one parameter is set to TRUE, then a named vector of mean per class errors are returned, where the names are "train", "valid"
+#' or "xval".
+#'
+#' @param object An \linkS4class{H2OBinomialMetrics} object.
+#' @param train Retrieve the training mean per class error
+#' @param valid Retrieve the validation mean per class error
+#' @param xval Retrieve the cross-validation mean per class error
+#' @seealso \code{\link{h2o.mse}} for MSE, and \code{\link{h2o.metric}} for the
+#'          various threshold metrics. See \code{\link{h2o.performance}} for
+#'          creating H2OModelMetrics objects.
+#' @examples
+#' \donttest{
+#' library(h2o)
+#' h2o.init()
+#'
+#' prosPath <- system.file("extdata", "prostate.csv", package="h2o")
+#' hex <- h2o.uploadFile(prosPath)
+#'
+#' hex[,2] <- as.factor(hex[,2])
+#' model <- h2o.gbm(x = 3:9, y = 2, training_frame = hex, distribution = "bernoulli")
+#' perf <- h2o.performance(model, hex)
+#' h2o.mean_per_class_error(perf)
+#' h2o.mean_per_class_error(model, train=TRUE)
+#' }
+#' @export
+h2o.mean_per_class_error <- function(object, train=FALSE, valid=FALSE, xval=FALSE) {
+  if( is(object, "H2OModelMetrics") ) return( object@metrics$mean_per_class_error )
+  if( is(object, "H2OModel") ) {
+    model.parts <- .model.parts(object)
+    if ( !train && !valid && !xval ) {
+      metric <- model.parts$tm@metrics$mean_per_class_error
+      if ( !is.null(metric) ) return(metric)
+    }
+    v <- c()
+    v_names <- c()
+    if ( train ) {
+      v <- c(v,model.parts$tm@metrics$mean_per_class_error)
+      v_names <- c(v_names,"train")
+    }
+    if ( valid ) {
+      if( is.null(model.parts$vm) ) return(invisible(.warn.no.validation()))
+      else {
+        v <- c(v,model.parts$vm@metrics$mean_per_class_error)
+        v_names <- c(v_names,"valid")
+      }
+    }
+    if ( xval ) {
+      if( is.null(model.parts$xm) ) return(invisible(.warn.no.cross.validation()))
+      else {
+        v <- c(v,model.parts$xm@metrics$mean_per_class_error)
+        v_names <- c(v_names,"xval")
+      }
+    }
+    if ( !is.null(v) ) {
+      names(v) <- v_names
+      if ( length(v)==1 ) { return( v[[1]] ) } else { return( v ) }
+    }
+  }
+  warning(paste0("No mean per class error for ", class(object)))
   invisible(NULL)
 }
 
@@ -1208,6 +1281,12 @@ h2o.error <- function(object, thresholds){
 #' @export
 h2o.maxPerClassError <- function(object, thresholds){
   1.0-h2o.metric(object, thresholds, "min_per_class_accuracy")
+}
+
+#' @rdname h2o.metric
+#' @export
+h2o.mean_per_class_accuracy <- function(object, thresholds){
+  h2o.metric(object, thresholds, "mean_per_class_accuracy")
 }
 
 #' @rdname h2o.metric

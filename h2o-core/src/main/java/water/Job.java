@@ -3,6 +3,8 @@ package water;
 import jsr166y.CountedCompleter;
 import java.util.Arrays;
 import water.H2O.H2OCountedCompleter;
+import water.api.schemas3.KeyV3;
+import water.util.ArrayUtils;
 import water.util.Log;
 
 /** Jobs are used to do minimal tracking of long-lifetime user actions,
@@ -25,8 +27,15 @@ public final class Job<T extends Keyed> extends Keyed<Job> {
   /** User description */
   public final String _description;
 
+  // whether the _result key is ready for view
+  private boolean _ready_for_view = true;
+
   private String [] _warns;
 
+  public void warn(String warn) {
+    Log.warn(warn);
+    setWarnings(ArrayUtils.append(warns(),warn));
+  }
   public void setWarnings(final String [] warns){
     new JAtomic() {
       @Override boolean abort(Job job) { return job._stop_requested; }
@@ -83,6 +92,9 @@ public final class Job<T extends Keyed> extends Keyed<Job> {
     return _end_time - _start_time; // Stopped
   }
 
+  public boolean readyForView() { return _ready_for_view; }
+  public void setReadyForView(boolean ready) { _ready_for_view = ready; }
+
   /** Jobs may be requested to Stop.  Each individual job will respond to this
    *  on a best-effort basis, and make some time to stop.  Stop really means
    *  "the Job stops", but is not an indication of any kind of error or fail.
@@ -111,12 +123,17 @@ public final class Job<T extends Keyed> extends Keyed<Job> {
 
   /** Total expected work. */
   public long _work;            // Total work to-do
+  public long _max_runtime_msecs;
   private long _worked;         // Work accomplished; between 0 and _work
   private String _msg;          // Progress string
 
   /** Returns a float from 0 to 1 representing progress.  Polled periodically.
    *  Can default to returning e.g. 0 always.  */
-  public float progress() { update_from_remote(); return _work==0 ? 0f : Math.min(1,(float)_worked/_work); }
+  public float progress() { update_from_remote();
+    float regularProgress = _work==0 ? 0f : Math.min(1,(float)_worked/_work);
+    if (_max_runtime_msecs>0) return Math.min(1,Math.max(regularProgress, (float)msec()/_max_runtime_msecs));
+    return regularProgress;
+  }
   /** Returns last progress message. */
   public String progress_msg() { update_from_remote(); return _msg; }
 
@@ -137,7 +154,10 @@ public final class Job<T extends Keyed> extends Keyed<Job> {
   /** A system key for global list of Job keys. */
   public static final Key<Job> LIST = Key.make(" JobList", (byte) 0, Key.BUILT_IN_KEY, false);
 
-  public String[] warns() {return _warns;}
+  public String[] warns() {
+    update_from_remote();
+    return _warns;
+  }
 
   private static class JobList extends Keyed {
     Key<Job>[] _jobs;
@@ -164,6 +184,11 @@ public final class Job<T extends Keyed> extends Keyed<Job> {
     // One-shot throw-away attempt at remove dead jobs from the jobs list
     DKV.DputIfMatch(LIST,new Value(LIST,new JobList(keys)),val,new Futures());
     return jobs;
+  }
+
+  public Job<T> start(final H2OCountedCompleter fjtask, long work, double max_runtime_secs) {
+    _max_runtime_msecs = (long)(max_runtime_secs*1e3);
+    return start(fjtask, work);
   }
 
   /** Start this task based on given top-level fork-join task representing job computation.
@@ -346,7 +371,8 @@ public final class Job<T extends Keyed> extends Keyed<Job> {
     if(_work      != remote._work      ) differ = true;
     if(_worked    != remote._worked    ) differ = true;
     if(_msg       != remote._msg       ) differ = true;
-    if( differ ) 
+    if(_max_runtime_msecs != remote._max_runtime_msecs) differ = true;
+    if( differ )
       synchronized(this) { 
         _stop_requested = remote._stop_requested;
         _start_time= remote._start_time;
@@ -355,7 +381,8 @@ public final class Job<T extends Keyed> extends Keyed<Job> {
         _work      = remote._work      ;
         _worked    = remote._worked    ;
         _msg       = remote._msg       ;
+        _max_runtime_msecs = remote._max_runtime_msecs;
       }
   }
-  @Override public Class<water.api.KeyV3.JobKeyV3> makeSchema() { return water.api.KeyV3.JobKeyV3.class; }
+  @Override public Class<KeyV3.JobKeyV3> makeSchema() { return KeyV3.JobKeyV3.class; }
 }

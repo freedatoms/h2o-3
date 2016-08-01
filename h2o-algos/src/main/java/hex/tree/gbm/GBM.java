@@ -130,8 +130,12 @@ public class GBM extends SharedTree<GBMModel,GBMModel.GBMParameters,GBMModel.GBM
 
     if( !(0. < _parms._learn_rate && _parms._learn_rate <= 1.0) )
       error("_learn_rate", "learn_rate must be between 0 and 1");
+    if( !(0. < _parms._learn_rate_annealing && _parms._learn_rate_annealing <= 1.0) )
+      error("_learn_rate_annealing", "learn_rate_annealing must be between 0 and 1");
     if( !(0. < _parms._col_sample_rate && _parms._col_sample_rate <= 1.0) )
       error("_col_sample_rate", "col_sample_rate must be between 0 and 1");
+    if (_parms._max_abs_leafnode_pred <= 0)
+      error("_max_abs_leafnode_pred", "max_abs_leafnode_pred must be larger than 0.");
   }
 
   // ----------------------
@@ -276,14 +280,16 @@ public class GBM extends SharedTree<GBMModel,GBMModel.GBMParameters,GBMModel.GBM
         Chunk offset = hasOffsetCol() ? chk_offset(chks) : new C0DChunk(0, chks[0]._len);
         Chunk preds = chk_tree(chks, 0); // Prior tree sums
         Chunk wk = chk_work(chks, 0); // Place to store residuals
+        Chunk weights = hasWeightCol() ? chk_weight(chks) : new C0DChunk(1, chks[0]._len);
         double fs[] = _nclass > 1 ? new double[_nclass+1] : null;
         Distribution dist = new Distribution(_parms);
         for( int row = 0; row < wk._len; row++) {
-          if( ys.isNA(row) ) continue;
+          double weight = weights.atd(row);
+          if (weight == 0) continue;
+          if (ys.isNA(row)) continue;
           double f = preds.atd(row) + offset.atd(row);
           double y = ys.atd(row);
           if( _parms._distribution == Distribution.Family.multinomial ) {
-            double weight = hasWeightCol() ? chk_weight(chks).atd(row) : 1;
             double sum = score1(chks, weight,0.0 /*offset not used for multiclass*/,fs,row);
             if( Double.isInfinite(sum) ) { // Overflow (happens for constant responses)
               for (int k = 0; k < _nclass; k++) {
@@ -306,16 +312,16 @@ public class GBM extends SharedTree<GBMModel,GBMModel.GBMParameters,GBMModel.GBM
     }
 
     class ComputeMinMax extends MRTask<ComputeMinMax> {
-      public ComputeMinMax(int start, int end) {
-        _start = start;
-        _end = end;
+      public ComputeMinMax(int firstLeafIndex, int totalNumNodes) {
+        _firstLeafIndex = firstLeafIndex;
+        _totalNumNodes = totalNumNodes;
       }
-      int _start;
-      int _end;
+      int _firstLeafIndex;
+      int _totalNumNodes;
       float[] _mins;
       float[] _maxs;
       @Override public void map( Chunk chks[] ) {
-        int _len = _end-_start;
+        int _len = _totalNumNodes - _firstLeafIndex; //number of leaves
         _mins = new float[_len];
         _maxs = new float[_len];
         Arrays.fill(_mins, Float.MAX_VALUE);
@@ -325,12 +331,17 @@ public class GBM extends SharedTree<GBMModel,GBMModel.GBMParameters,GBMModel.GBM
         Chunk offset = hasOffsetCol() ? chk_offset(chks) : new C0DChunk(0, chks[0]._len);
         Chunk preds = chk_tree(chks, 0); // Prior tree sums
         Chunk nids = chk_nids(chks, 0);
+        Chunk weights = hasWeightCol() ? chk_weight(chks) : new C0DChunk(1, chks[0]._len);
         for( int row = 0; row < preds._len; row++) {
           if( ys.isNA(row) ) continue;
+          if (weights.atd(row)==0) continue;
+          int nid = (int)nids.at8(row);
+          assert(nid!=ScoreBuildHistogram.UNDECIDED_CHILD_NODE_ID);
+          if (nid < 0) continue; //skip OOB and otherwise skipped rows
           float f = (float)(preds.atd(row) + offset.atd(row));
-          int nidx = (int)nids.at8(row);
-          _mins[nidx-_start] = Math.min(_mins[nidx-_start], f);
-          _maxs[nidx-_start] = Math.max(_maxs[nidx-_start], f);
+          int idx = nid - _firstLeafIndex;
+          _mins[idx] = Math.min(_mins[idx], f);
+          _maxs[idx] = Math.max(_maxs[idx], f);
         }
       }
 
@@ -344,19 +355,20 @@ public class GBM extends SharedTree<GBMModel,GBMModel.GBMParameters,GBMModel.GBM
     final static private double MIN_LOG_TRUNC = -19;
     final static private double MAX_LOG_TRUNC = 19;
 
-    private void truncatePreds(DTree[] ktrees, int[] leafs, Distribution.Family dist, ComputeMinMax minMax) {
-//        Log.info("Number of leaf nodes: " + minValues.length);
-//        Log.info("Min: " + java.util.Arrays.toString(minValues));
-//        Log.info("Max: " + java.util.Arrays.toString(maxValues));
-      assert(_nclass == 1);
-      final DTree tree = ktrees[0];
-      assert (tree != null);
-      //loop over leaf nodes only
-      for (int i = 0; i < tree._len - leafs[0]; i++) {
-        final LeafNode node = ((LeafNode) tree.node(leafs[0] + i));
+    private void truncatePreds(final DTree tree, int firstLeafIndex, Distribution.Family dist) {
+      if (firstLeafIndex==tree._len) return;
+      ComputeMinMax minMax = new ComputeMinMax(firstLeafIndex, tree._len).doAll(_train);
+      if (DEV_DEBUG) {
+        Log.info("Number of leaf nodes: " + minMax._mins.length);
+        Log.info("Min: " + java.util.Arrays.toString(minMax._mins));
+        Log.info("Max: " + java.util.Arrays.toString(minMax._maxs));
+      }
+      //loop over leaf nodes only: starting at leaf index
+      for (int i = 0; i < tree._len - firstLeafIndex; i++) {
+        final LeafNode node = ((LeafNode) tree.node(firstLeafIndex + i));
         int nidx = node.nid();
-        float nodeMin = minMax._mins[nidx-leafs[0]];
-        float nodeMax = minMax._maxs[nidx-leafs[0]];
+        float nodeMin = minMax._mins[nidx- firstLeafIndex];
+        float nodeMax = minMax._maxs[nidx- firstLeafIndex];
 //        Log.info("Node: " + nidx + " min/max: " + nodeMin + "/" + nodeMax);
 
         // https://github.com/cran/gbm/blob/master/src/poisson.cpp
@@ -392,41 +404,52 @@ public class GBM extends SharedTree<GBMModel,GBMModel.GBMParameters,GBMModel.GBM
     // --------------------------------------------------------------------------
     // Build the next k-trees, which is trying to correct the residual error from
     // the prior trees.
-    @Override protected void buildNextKTrees() {
+    @Override protected boolean buildNextKTrees() {
       // We're going to build K (nclass) trees - each focused on correcting
       // errors for a single class.
       final DTree[] ktrees = new DTree[_nclass];
 
       // Define a "working set" of leaf splits, from here to tree._len
-      int[] leafs = new int[_nclass];
+      int[] leaves = new int[_nclass];
 
-      // Compute predictions and resulting residuals for trees built so far
+      // Compute predictions and resulting re
       // ESL2, page 387, Steps 2a, 2b
       new ComputePredAndRes().doAll(_train, _parms._build_tree_one_node); //fills "Work" columns for all rows (incl. OOB)
+      for (int k = 0; k < _nclass; k++) {
+        if (DEV_DEBUG && ktrees[k]!=null) {
+          System.out.println("Updated predictions in WORK col for class " + k + ":\n" + new Frame(new String[]{"WORK"},new Vec[]{vec_work(_train, k)}).toString());
+        }
+      }
 
       // ----
       // ESL2, page 387.  Step 2b ii.
       // One Big Loop till the ktrees are of proper depth.
       // Adds a layer to the trees each pass.
-      growTrees(ktrees, leafs, _rand); //assign to OOB and split using non-OOB only
+      growTrees(ktrees, leaves, _rand);
+      for (int k = 0; k < _nclass; k++) {
+        if (DEV_DEBUG && ktrees[k]!=null) {
+          System.out.println("Grew trees. Updated NIDs for class " + k + ":\n" + new Frame(new String[]{"NIDS"},new Vec[]{vec_nids(_train, k)}).toString());
+        }
+      }
 
       // ----
       // ESL2, page 387.  Step 2b iii.  Compute the gammas (leaf node predictions === fit best constant), and store them back
       // into the tree leaves.  Includes learn_rate.
-      GammaPass gp = new GammaPass(ktrees, leafs, _parms._distribution).doAll(_train);
+      GammaPass gp = new GammaPass(ktrees, leaves, _parms._distribution).doAll(_train);
       if (_parms._distribution == Distribution.Family.laplace) {
-        fitBestConstantsQuantile(ktrees, leafs, 0.5); //special case for Laplace: compute the median for each leaf node and store that as prediction
+        fitBestConstantsQuantile(ktrees, leaves[0], 0.5); //special case for Laplace: compute the median for each leaf node and store that as prediction
       } else if (_parms._distribution == Distribution.Family.quantile) {
-        fitBestConstantsQuantile(ktrees, leafs, _parms._quantile_alpha); //compute the alpha-quantile for each leaf node and store that as prediction
+        fitBestConstantsQuantile(ktrees, leaves[0], _parms._quantile_alpha); //compute the alpha-quantile for each leaf node and store that as prediction
       } else {
-        fitBestConstants(ktrees, leafs, gp);
+        fitBestConstants(ktrees, leaves, gp);
       }
 
       // Apply a correction for strong mispredictions (otherwise deviance can explode)
       if (_parms._distribution == Distribution.Family.gamma ||
               _parms._distribution == Distribution.Family.poisson ||
               _parms._distribution == Distribution.Family.tweedie) {
-        truncatePreds(ktrees, leafs, _parms._distribution, new ComputeMinMax(leafs[0],ktrees[0].len()).doAll(_train));
+        assert(_nclass == 1);
+        truncatePreds(ktrees[0], leaves[0], _parms._distribution);
       }
 
       // ----
@@ -436,11 +459,22 @@ public class GBM extends SharedTree<GBMModel,GBMModel.GBMParameters,GBMModel.GBM
       // Nids <== 0
       new AddTreeContributions(ktrees).doAll(_train);
 
+      // sanity check
+      for (int k = 0; k < _nclass; k++) {
+        if (ktrees[k]!=null) assert(vec_nids(_train,k).mean()==0);
+      }
+
       // Grow the model by K-trees
       _model._output.addKTrees(ktrees);
+
+      boolean converged = effective_learning_rate() < 1e-6;
+      if (converged) {
+        Log.warn("Effective learning rate dropped below 1e-6 (" + _parms._learn_rate + " * " + _parms._learn_rate_annealing + "^" + (_model._output._ntrees-1) + ") - stopping the model now.");
+      }
+      return converged;
     }
 
-    private void growTrees(DTree[] ktrees, int[] leafs, Random rand) {
+    private void growTrees(DTree[] ktrees, int[] leaves, Random rand) {
       // Initial set of histograms.  All trees; one leaf per tree (the root
       // leaf); all columns
       DHistogram hcs[][][] = new DHistogram[_nclass][1/*just root leaf*/][_ncols];
@@ -454,19 +488,26 @@ public class GBM extends SharedTree<GBMModel,GBMModel.GBMParameters,GBMModel.GBM
         // Initially setup as-if an empty-split had just happened
         if (_model._output._distribution[k] != 0) {
           if (k == 1 && _nclass == 2) continue; // Boolean Optimization (only one tree needed for 2-class problems)
-          ktrees[k] = new DTree(_train, _ncols, (char)_parms._nbins, (char)_parms._nbins_cats, (char)_nclass, _parms._min_rows, _mtry, _mtry_per_tree, rseed);
-          new UndecidedNode(ktrees[k], -1, DHistogram.initialHist(_train, _ncols, adj_nbins, _parms._nbins_cats, hcs[k][0])); // The "root" node
+          ktrees[k] = new DTree(_train, _ncols, (char)_nclass, _mtry, _mtry_per_tree, rseed, _parms);
+          DHistogram[] hist = DHistogram.initialHist(_train, _ncols, adj_nbins, hcs[k][0], rseed, _parms, getGlobalQuantilesKeys());
+          new UndecidedNode(ktrees[k], DTree.NO_PARENT, hist); // The "root" node
         }
       }
 
       // Sample - mark the lines by putting 'OUT_OF_BAG' into nid(<klass>) vector
-      if (_parms._sample_rate < 1) {
+      if (_parms._sample_rate < 1 || _parms._sample_rate_per_class != null) {
         Sample ss[] = new Sample[_nclass];
         for (int k = 0; k < _nclass; k++)
           if (ktrees[k] != null)
-            ss[k] = new Sample(ktrees[k], _parms._sample_rate).dfork(null, new Frame(vec_nids(_train, k), vec_resp(_train)), _parms._build_tree_one_node);
-        for (int k = 0; k < _nclass; k++)
-          if (ss[k] != null) ss[k].getResult();
+            ss[k] = new Sample(ktrees[k], _parms._sample_rate, _parms._sample_rate_per_class).dfork(null, new Frame(vec_nids(_train, k), _response), _parms._build_tree_one_node);
+        for (int k = 0; k < _nclass; k++) {
+          if (ss[k] != null) {
+            ss[k].getResult();
+            if (DEV_DEBUG && ktrees[k]!=null) {
+              System.out.println("Sampled OOB rows. NIDS:\n" + new Frame(vec_nids(_train, k)).toString());
+            }
+          }
+        }
       }
 
       // ----
@@ -475,7 +516,7 @@ public class GBM extends SharedTree<GBMModel,GBMModel.GBMParameters,GBMModel.GBM
       // Adds a layer to the trees each pass.
       int depth = 0;
       for (; depth < _parms._max_depth; depth++) {
-        hcs = buildLayer(_train, _parms._nbins, _parms._nbins_cats, ktrees, leafs, hcs, _mtry < _model._output.nfeatures(), _parms._build_tree_one_node);
+        hcs = buildLayer(_train, _parms._nbins, _parms._nbins_cats, ktrees, leaves, hcs, _parms._build_tree_one_node);
         // If we did not make any new splits, then the tree is split-to-death
         if (hcs == null) break;
       }
@@ -485,21 +526,22 @@ public class GBM extends SharedTree<GBMModel,GBMModel.GBMParameters,GBMModel.GBM
       for (int k = 0; k < _nclass; k++) {
         DTree tree = ktrees[k];
         if (tree == null) continue;
-        int leaf = leafs[k] = tree.len();
+        int leaf = tree.len();
+        leaves[k] = leaf; //record the size of the tree before splitting the bottom nodes as the starting index for the leaf node indices
         for (int nid = 0; nid < leaf; nid++) {
           if (tree.node(nid) instanceof DecidedNode) {
             DecidedNode dn = tree.decided(nid);
-            if (dn._split._col == -1) { // No decision here, no row should have this NID now
+            if (dn._split == null) { // No decision here, no row should have this NID now
               if (nid == 0)               // Handle the trivial non-splitting tree
-                new LeafNode(tree, -1, 0);
+                new LeafNode(tree, DTree.NO_PARENT, 0);
               continue;
             }
-            for (int i = 0; i < dn._nids.length; i++) {
+            for (int i = 0; i < dn._nids.length; i++) { //L/R children
               int cnid = dn._nids[i];
-              if (cnid == -1 || // Bottomed out (predictors or responses known constant)
+              if (cnid == ScoreBuildHistogram.UNDECIDED_CHILD_NODE_ID ||    // Bottomed out (predictors or responses known constant)
                       tree.node(cnid) instanceof UndecidedNode || // Or chopped off for depth
                       (tree.node(cnid) instanceof DecidedNode &&  // Or not possible to split
-                              ((DecidedNode) tree.node(cnid))._split.col() == -1))
+                              ((DecidedNode) tree.node(cnid))._split == null))
                 dn._nids[i] = new LeafNode(tree, nid).nid(); // Mark a leaf here
             }
           }
@@ -507,32 +549,51 @@ public class GBM extends SharedTree<GBMModel,GBMModel.GBMParameters,GBMModel.GBM
       } // -- k-trees are done
     }
 
-    private void fitBestConstantsQuantile(DTree[] ktrees, int[] leafs, double quantile) {
-      assert(_nclass==1);
-      Vec response = new MRTask() {
-        @Override
-        public void map(Chunk[] chks, NewChunk[] nc) {
-          final Chunk resp = chk_resp(chks);
-          final Chunk offset = hasOffsetCol() ? chk_offset(chks) : new C0DChunk(0, chks[0]._len); // Residuals for this tree/class
-          final Chunk preds = chk_tree(chks,0);
-          for (int i=0; i<chks[0].len(); ++i)
-            nc[0].addNum(resp.atd(i) - preds.atd(i) - offset.atd(i)); //y - (f+o)
+    public class QuantilePrep extends MRTask<QuantilePrep> {
+      @Override
+      public void map(Chunk[] chks, NewChunk[] nc) {
+        final Chunk resp = chk_resp(chks);
+        final Chunk offset = hasOffsetCol() ? chk_offset(chks) : new C0DChunk(0, chks[0]._len); // Residuals for this tree/class
+        final Chunk preds = chk_tree(chks,0);
+        final Chunk nids  = chk_nids(chks,0);
+        final Chunk weights  = hasWeightCol() ? chk_weight(chks) : new C0DChunk(1, chks[0]._len);
+        for (int i=0; i<chks[0].len(); ++i) {
+          nc[0].addNum(resp.atd(i) - (preds.atd(i) + offset.atd(i))); //y - (f+o)
+          if (resp.isNA(i)) continue;
+          if (weights.atd(i)==0) continue;
+          assert(!nids.isNA(i));
+          int nid = (int)nids.at8(i);
         }
-      }.doAll(1, (byte)3 /*numeric*/, _train).outputFrame().anyVec();
+      }
+    }
+
+    private void fitBestConstantsQuantile(DTree[] ktrees, int firstLeafIndex, double quantile) {
+      if (firstLeafIndex == ktrees[0]._len) return; // no splits happened - nothing to do
+      assert(_nclass==1);
+      QuantilePrep qp = new QuantilePrep();
+      Vec response = qp.doAll(1, (byte)3 /*numeric*/, _train).outputFrame().anyVec();
       Vec weights = hasWeightCol() ? _train.vecs()[idx_weight()] : null;
-      Vec strata = _train.vecs()[idx_nids(0)];
+      Vec strata = vec_nids(_train,0);
 
       // compute quantile for all leaf nodes
       Quantile.StratifiedQuantilesTask sqt = new Quantile.StratifiedQuantilesTask(null, quantile, response, weights, strata, QuantileModel.CombineMethod.INTERPOLATE);
       H2O.submitTask(sqt);
       sqt.join();
 
+      final DTree tree = ktrees[0];
       for (int i = 0; i < sqt._quantiles.length; i++) {
-        float val = (float) (_parms._learn_rate * sqt._quantiles[i]);
-        assert !Float.isNaN(val) && !Float.isInfinite(val);
-        ((LeafNode) ktrees[0].node(Math.max(0,(int)strata.min()) + i))._pred = val;
-//        Log.info("Leaf " + ((int)strata.min()+i) + " has quantile: " + sqt._quantiles[i]);
+        if (Double.isNaN(sqt._quantiles[i])) continue; //no active rows for this NID
+        double val = effective_learning_rate() * sqt._quantiles[i];
+        assert !Double.isNaN(val) && !Double.isInfinite(val);
+        if (val > _parms._max_abs_leafnode_pred) val = _parms._max_abs_leafnode_pred;
+        if (val < -_parms._max_abs_leafnode_pred) val = -_parms._max_abs_leafnode_pred;
+        ((LeafNode) tree.node(sqt._nids[i]))._pred = (float) val;
+        if (DEV_DEBUG) { Log.info("Leaf " + sqt._nids[i] + " has quantile: " + sqt._quantiles[i]); }
       }
+    }
+
+    private double effective_learning_rate() {
+      return _parms._learn_rate * Math.pow(_parms._learn_rate_annealing, (_model._output._ntrees-1));
     }
 
     private void fitBestConstants(DTree[] ktrees, int[] leafs, GammaPass gp) {
@@ -540,8 +601,9 @@ public class GBM extends SharedTree<GBMModel,GBMModel.GBMParameters,GBMModel.GBM
       for (int k = 0; k < _nclass; k++) {
         final DTree tree = ktrees[k];
         if (tree == null) continue;
+        if (DEV_DEBUG) for (int i=0;i<ktrees[k]._len-leafs[k];++i) System.out.println(ktrees[k].node(leafs[k]+i).toString());
         for (int i = 0; i < tree._len - leafs[k]; i++) {
-          float gf = (float) (_parms._learn_rate * m1class * gp.gamma(k, i));
+          double gf = effective_learning_rate() * m1class * gp.gamma(k, i);
           // In the multinomial case, check for very large values (which will get exponentiated later)
           // Note that gss can be *zero* while rss is non-zero - happens when some rows in the same
           // split are perfectly predicted true, and others perfectly predicted false.
@@ -549,8 +611,11 @@ public class GBM extends SharedTree<GBMModel,GBMModel.GBMParameters,GBMModel.GBM
             if (gf > 1e4) gf = 1e4f; // Cap prediction, will already overflow during Math.exp(gf)
             else if (gf < -1e4) gf = -1e4f;
           }
-          assert !Float.isNaN(gf) && !Float.isInfinite(gf);
-          ((LeafNode) tree.node(leafs[k] + i))._pred = gf;
+          if (Double.isNaN(gf)) gf=0;
+          else if (Double.isInfinite(gf)) gf=Math.signum(gf)*1e4f;
+          if (gf > _parms._max_abs_leafnode_pred) gf = _parms._max_abs_leafnode_pred;
+          if (gf < -_parms._max_abs_leafnode_pred) gf = -_parms._max_abs_leafnode_pred;
+          ((LeafNode) tree.node(leafs[k] + i))._pred = (float) gf;
         }
       }
     }
@@ -566,7 +631,7 @@ public class GBM extends SharedTree<GBMModel,GBMModel.GBMParameters,GBMModel.GBM
     //    gamma_i = sum res_i / count(res_i)
     private class GammaPass extends MRTask<GammaPass> {
       final DTree _trees[]; // Read-only, shared (except at the histograms in the Nodes)
-      final int   _leafs[]; // Number of active leaves (per tree)
+      final int _leafs[];  // Starting index of leaves (per class-tree)
       final Distribution.Family _dist;
       private double _num[/*tree/klass*/][/*tree-relative node-id*/];
       private double _denom[/*tree/klass*/][/*tree-relative node-id*/];
@@ -574,8 +639,7 @@ public class GBM extends SharedTree<GBMModel,GBMModel.GBMParameters,GBMModel.GBM
       double gamma(int tree, int nid) {
         if (_denom[tree][nid] == 0) return 0;
         double g = _num[tree][nid]/ _denom[tree][nid];
-        assert(!Double.isInfinite(g)) : "numeric overflow";
-        assert(!Double.isNaN(g)) : "numeric overflow";
+        assert (!Double.isInfinite(g) && !Double.isNaN(g));
         if (_dist == Distribution.Family.poisson
                 || _dist == Distribution.Family.gamma
                 || _dist == Distribution.Family.tweedie)
@@ -604,6 +668,7 @@ public class GBM extends SharedTree<GBMModel,GBMModel.GBMParameters,GBMModel.GBM
           final DTree tree = _trees[k];
           final int   leaf = _leafs[k];
           if( tree == null ) continue; // Empty class is ignored
+          assert(tree._len-leaf >= 0);
 
           // A leaf-biased array of all active Tree leaves.
           final double denom[] = _denom[k] = new double[tree._len-leaf];
@@ -612,24 +677,31 @@ public class GBM extends SharedTree<GBMModel,GBMModel.GBMParameters,GBMModel.GBM
           final Chunk ress = chk_work(chks, k); // Residuals for this tree/class
           final Chunk offset = hasOffsetCol() ? chk_offset(chks) : new C0DChunk(0, chks[0]._len); // Residuals for this tree/class
           final Chunk preds = chk_tree(chks,k);
+          final Chunk weights = hasWeightCol() ? chk_weight(chks) : new C0DChunk(1, chks[0]._len);
 
           // If we have all constant responses, then we do not split even the
           // root and the residuals should be zero.
-          if( tree.root() instanceof LeafNode ) continue;
+          if( tree.root() instanceof LeafNode )
+            continue;
           Distribution dist = new Distribution(_parms);
           for( int row=0; row<nids._len; row++ ) { // For all rows
+            double w = weights.atd(row);
+            if (w==0) continue;
+
+            double y = resp.atd(row); //response
+            if (Double.isNaN(y)) continue;
+
+            // Compute numerator and denominator of terminal node estimate (gamma)
             int nid = (int)nids.at8(row);          // Get Node to decide from
-
-            final boolean wasOOBRow = ScoreBuildHistogram.isOOBRow((int)chk_nids(chks,k).at8(row)); //same for all k
+            final boolean wasOOBRow = ScoreBuildHistogram.isOOBRow(nid); //same for all k
             if (wasOOBRow) nid = ScoreBuildHistogram.oob2Nid(nid);
-
-            if( nid < 0 ) continue;                // Missing response
+            if (nid < 0) continue;
             if( tree.node(nid) instanceof UndecidedNode ) // If we bottomed out the tree
               nid = tree.node(nid).pid();                  // Then take parent's decision
             DecidedNode dn = tree.decided(nid);           // Must have a decision point
-            if( dn._split._col == -1 )                    // Unable to decide?
+            if( dn._split == null )                    // Unable to decide?
               dn = tree.decided(dn.pid());  // Then take parent's decision
-            int leafnid = dn.ns(chks,row); // Decide down to a leafnode
+            int leafnid = dn.getChildNodeID(chks,row); // Decide down to a leafnode
             assert leaf <= leafnid && leafnid < tree._len :
                     "leaf: " + leaf + " leafnid: " + leafnid + " tree._len: " + tree._len + "\ndn: " + dn;
             assert tree.node(leafnid) instanceof LeafNode;
@@ -644,9 +716,6 @@ public class GBM extends SharedTree<GBMModel,GBMModel.GBMParameters,GBMModel.GBM
             // For Laplace/Quantile distribution, we need to compute the median of (y-offset-preds == y-f), will be done outside of here
             if (wasOOBRow || _parms._distribution == Distribution.Family.laplace || _parms._distribution == Distribution.Family.quantile) continue;
 
-            // Compute numerator and denominator of terminal node estimate (gamma)
-            double w = hasWeightCol() ? chk_weight(chks).atd(row) : 1; //weight
-            double y = resp.atd(row); //response
             double z = ress.atd(row); //residual
             double f = preds.atd(row) + offset.atd(row);
             int idx=leafnid-leaf;
@@ -671,13 +740,17 @@ public class GBM extends SharedTree<GBMModel,GBMModel.GBMParameters,GBMModel.GBM
           if( tree == null ) continue;
           final Chunk nids = chk_nids(chks,k);
           final Chunk ct   = chk_tree(chks, k);
+          final Chunk y   = chk_resp(chks);
+          final Chunk weights = hasWeightCol() ? chk_weight(chks) : new C0DChunk(1, chks[0]._len);
           for( int row=0; row<nids._len; row++ ) {
             int nid = (int)nids.at8(row);
+            nids.set(row, ScoreBuildHistogram.FRESH);
             if( nid < 0 ) continue;
+            if (y.isNA(row)) continue;
+            if (weights.atd(row)==0) continue;
             // Prediction stored in Leaf is cut to float to be deterministic in reconstructing
             // <tree_klazz> fields from tree prediction
             ct.set(row, (float)(ct.atd(row) + ((LeafNode)tree.node(nid))._pred));
-            nids.set(row, 0);
           }
         }
       }

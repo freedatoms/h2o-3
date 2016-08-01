@@ -8,6 +8,7 @@ import hex.genmodel.easy.prediction.*;
 import org.joda.time.DateTime;
 import water.*;
 import water.api.StreamWriter;
+import water.api.schemas3.KeyV3;
 import water.codegen.CodeGenerator;
 import water.codegen.CodeGeneratorPipeline;
 import water.exceptions.JCodeSB;
@@ -43,6 +44,10 @@ public abstract class Model<M extends Model<M,P,O>, P extends Model.Parameters, 
 
   public interface LeafNodeAssignment {
     Frame scoreLeafNodeAssignment(Frame frame, Key destination_key);
+  }
+
+  public interface ExemplarMembers {
+    Frame scoreExemplarMembers(Key destination_key, int exemplarIdx);
   }
 
   /**
@@ -94,10 +99,18 @@ public abstract class Model<M extends Model<M,P,O>, P extends Model.Parameters, 
     public boolean _keep_cross_validation_predictions = false;
     public boolean _keep_cross_validation_fold_assignment = false;
     public boolean _parallelize_cross_validation = true;
+    public boolean _auto_rebalance = true;
     public enum FoldAssignmentScheme {
       AUTO, Random, Modulo, Stratified
     }
-    protected long nFoldSeed() { return new Random().nextLong(); }
+    public long _seed = -1;
+    public long getOrMakeRealSeed(){
+      while (_seed==-1) {
+        _seed = RandomUtils.getRNG(System.nanoTime()).nextLong();
+        Log.debug("Auto-generated time-based seed for pseudo-random number generator (because it was set to -1): " + _seed);
+      }
+      return _seed;
+    }
     public FoldAssignmentScheme _fold_assignment = FoldAssignmentScheme.AUTO;
     public Distribution.Family _distribution = Distribution.Family.AUTO;
     public double _tweedie_power = 1.5;
@@ -428,7 +441,7 @@ public abstract class Model<M extends Model<M,P,O>, P extends Model.Parameters, 
     public String weightsName () { return _hasWeights ?_names[weightsIdx()]:null;}
     public String offsetName  () { return _hasOffset ?_names[offsetIdx()]:null;}
     public String foldName  () { return _hasFold ?_names[foldIdx()]:null;}
-    public InteractionPair[] interactions() { return null; }
+    public String[] interactions() { return null; }
     // Vec layout is  [c1,c2,...,cn,w?,o?,r], cn are predictor cols, r is response, w and o are weights and offset, both are optional
     public int weightsIdx     () {
       if(!_hasWeights) return -1;
@@ -449,7 +462,7 @@ public abstract class Model<M extends Model<M,P,O>, P extends Model.Parameters, 
 
     /** The names of the levels for an categorical response column. */
     public String[] classNames() { assert isSupervised();
-      return _domains[_domains.length-1];
+      return _domains == null || _domains.length==0 ? null : _domains[_domains.length-1];
     }
     /** Is this model a classification model? (v. a regression or clustering model) */
     public boolean isClassifier() { return isSupervised() && nclasses() > 1; }
@@ -559,7 +572,7 @@ public abstract class Model<M extends Model<M,P,O>, P extends Model.Parameters, 
     scoringInfo.cross_validation = _output._cross_validation_metrics != null;
 
     if (this._output.isBinomialClassifier()) {
-      scoringInfo.training_AUC = ((ModelMetricsBinomial)this._output._training_metrics)._auc;
+      scoringInfo.training_AUC = this._output._training_metrics == null ? null: ((ModelMetricsBinomial)this._output._training_metrics)._auc;
       scoringInfo.validation_AUC = this._output._validation_metrics == null ? null : ((ModelMetricsBinomial)this._output._validation_metrics)._auc;
     }
   }
@@ -580,6 +593,10 @@ public abstract class Model<M extends Model<M,P,O>, P extends Model.Parameters, 
         return (float) classification_error();
       case AUC:
         return (float)(1-auc());
+      case mean_per_class_error:
+        return (float)mean_per_class_error();
+      case lift_top_group:
+        return (float)lift_top_group();
       case AUTO:
       default:
         return (float) (_output.isClassifier() ? logloss() : _output.isAutoencoder() ? mse() : deviance());
@@ -619,6 +636,16 @@ public abstract class Model<M extends Model<M,P,O>, P extends Model.Parameters, 
   public double logloss() {
     if (scoringInfo == null) return Double.NaN;
     return last_scored().validation ? last_scored().scored_valid._logloss : last_scored().scored_train._logloss;
+  }
+
+  public double mean_per_class_error() {
+    if (scoringInfo == null) return Double.NaN;
+    return last_scored().validation ? last_scored().scored_valid._mean_per_class_error : last_scored().scored_train._mean_per_class_error;
+  }
+
+  public double lift_top_group() {
+    if (scoringInfo == null) return Double.NaN;
+    return last_scored().validation ? last_scored().scored_valid._lift : last_scored().scored_train._lift;
   }
 
 
@@ -675,7 +702,7 @@ public abstract class Model<M extends Model<M,P,O>, P extends Model.Parameters, 
    * @param domains Training column levels
    * @param missing Substitute for missing columns; usually NaN
    * */
-  public static String[] adaptTestForTrain(String[] names, String weights, String offset, String fold, String response, String[][] domains, Frame test, double missing, boolean expensive, boolean computeMetrics, InteractionPair[] interactions) throws IllegalArgumentException {
+  public static String[] adaptTestForTrain(String[] names, String weights, String offset, String fold, String response, String[][] domains, Frame test, double missing, boolean expensive, boolean computeMetrics, String[] interactions) throws IllegalArgumentException {
     if( test == null) return new String[0];
     // Fast path cutout: already compatible
     String[][] tdomains = test.domains();
@@ -684,6 +711,15 @@ public abstract class Model<M extends Model<M,P,O>, P extends Model.Parameters, 
     // Fast path cutout: already compatible but needs work to test
     if( Arrays.equals(names,test._names) && Arrays.deepEquals(domains,tdomains) )
       return new String[0];
+
+    // create the interactions now and bolt them on to the front of the test Frame
+    if( null!=interactions ) {
+      int[] interactionIndexes = new int[interactions.length];
+      for(int i=0;i<interactions.length;++i)
+        interactionIndexes[i] = test.find(interactions[i]);
+      test.add(makeInteractions(test, false, InteractionPair.generatePairwiseInteractionsFromList(interactionIndexes), true, true, false));
+    }
+
 
     // Build the validation set to be compatible with the training set.
     // Toss out extra columns, complain about missing ones, remap categoricals
@@ -699,9 +735,6 @@ public abstract class Model<M extends Model<M,P,O>, P extends Model.Parameters, 
       boolean isOffset = offset != null && names[i].equals(offset);
       boolean isFold = fold != null && names[i].equals(fold);
 
-      int interactionID=-1;
-      boolean isIWV  = interactions !=null && (interactionID=InteractionPair.isInteraction(i,interactions))>=0;
-
       if(vec == null && isResponse && computeMetrics)
         throw new IllegalArgumentException("Test/Validation dataset is missing response vector '" + response + "'");
       if(vec == null && isOffset)
@@ -710,10 +743,6 @@ public abstract class Model<M extends Model<M,P,O>, P extends Model.Parameters, 
         vec = test.anyVec().makeCon(1);
         msgs.add(H2O.technote(1, "Test/Validation dataset is missing the weights column '" + names[i] + "' (needed because a response was found and metrics are to be computed): substituting in a column of 1s"));
         //throw new IllegalArgumentException(H2O.technote(1, "Test dataset is missing weights vector '" + weights + "' (needed because a response was found and metrics are to be computed)."));
-      }
-      if( null==vec && isIWV ) {  // got an interaciton wrapped vec
-        assert interactionID>=0 && interactionID < interactions.length: "Got an interaction vec, but the interactionID is invalid";
-        vec = makeInteraction(test, interactions[interactionID],true,false,false); // DKV put happens in the InteractionWrappedVec constructor
       }
 
       // If a training set column is missing in the validation set, complain and fill in with NAs.
@@ -1261,6 +1290,7 @@ public abstract class Model<M extends Model<M,P,O>, P extends Model.Parameters, 
         Class clz = JCodeGen.compile(modelName,java_text);
         genmodel = (GenModel)clz.newInstance();
       } catch (Exception e) {
+        e.printStackTrace();
         throw H2O.fail("Internal POJO compilation failed",e);
       }
 
@@ -1318,6 +1348,8 @@ public abstract class Model<M extends Model<M,P,O>, P extends Model.Parameters, 
                             d2 = (col==0) ? bmp.labelIndex : bmp.classProbabilities[col-1];  break;
           case Multinomial: MultinomialModelPrediction mmp = (MultinomialModelPrediction) p;
                             d2 = (col==0) ? mmp.labelIndex : mmp.classProbabilities[col-1];  break;
+          case DimReduction: d2 = ((DimReductionModelPrediction) p).dimensions[col]; break;
+
           }
           if( !MathUtils.compare(d2, d, 1e-15, rel_epsilon) ) {
             miss++;
@@ -1364,7 +1396,7 @@ public abstract class Model<M extends Model<M,P,O>, P extends Model.Parameters, 
     }
   }
 
-  @Override public Class<water.api.KeyV3.ModelKeyV3> makeSchema() { return water.api.KeyV3.ModelKeyV3.class; }
+  @Override public Class<KeyV3.ModelKeyV3> makeSchema() { return KeyV3.ModelKeyV3.class; }
 
   public static Frame makeInteractions(Frame fr, boolean valid, InteractionPair[] interactions, boolean useAllFactorLevels, boolean skipMissing, boolean standardize) {
     Vec anyTrainVec = fr.anyVec();
@@ -1374,17 +1406,25 @@ public abstract class Model<M extends Model<M,P,O>, P extends Model.Parameters, 
     for (InteractionPair ip : interactions) {
       interactionNames[idx] = fr.name(ip._v1) + "_" + fr.name(ip._v2);
       InteractionWrappedVec iwv =new InteractionWrappedVec(anyTrainVec.group().addVec(), anyTrainVec._rowLayout, ip._v1Enums, ip._v2Enums, useAllFactorLevels, skipMissing, standardize, fr.vec(ip._v1)._key, fr.vec(ip._v2)._key);
-      if(!valid) ip.setDomain(iwv.domain());
+//      if(!valid) ip.setDomain(iwv.domain());
       interactionVecs[idx++] = iwv;
     }
     return new Frame(interactionNames, interactionVecs);
+  }
+
+  public static InteractionWrappedVec[] makeInteractions(Frame fr, InteractionPair[] interactions, boolean useAllFactorLevels, boolean skipMissing, boolean standardize) {
+    Vec anyTrainVec = fr.anyVec();
+    InteractionWrappedVec[] interactionVecs = new InteractionWrappedVec[interactions.length];
+    int idx = 0;
+    for (InteractionPair ip : interactions)
+      interactionVecs[idx++] = new InteractionWrappedVec(anyTrainVec.group().addVec(), anyTrainVec._rowLayout, ip._v1Enums, ip._v2Enums, useAllFactorLevels, skipMissing, standardize, fr.vec(ip._v1)._key, fr.vec(ip._v2)._key);
+    return interactionVecs;
   }
 
   public static InteractionWrappedVec makeInteraction(Frame fr, InteractionPair ip, boolean useAllFactorLevels, boolean skipMissing, boolean standardize) {
     Vec anyVec = fr.anyVec();
     return new InteractionWrappedVec(anyVec.group().addVec(), anyVec._rowLayout, ip._v1Enums, ip._v2Enums, useAllFactorLevels, skipMissing, standardize, fr.vec(ip._v1)._key, fr.vec(ip._v2)._key);
   }
-
 
   /**
    * This class represents a pair of interacting columns plus some additional data
@@ -1445,8 +1485,10 @@ public abstract class Model<M extends Model<M,P,O>, P extends Model.Parameters, 
      */
     public static InteractionPair[] generatePairwiseInteractionsFromList(int... indexes) {
       if( null==indexes ) return null;
-      if( indexes.length < 2 )
+      if( indexes.length < 2 ) {
+        if( indexes.length==1 && indexes[0]==-1 ) return null;
         throw new IllegalArgumentException("Must supply 2 or more columns.");
+      }
       InteractionPair[] res = new InteractionPair[ (indexes.length-1)*(indexes.length)>>1]; // n*(n+1) / 2
       int idx=0;
       for(int i=0;i<indexes.length;++i)

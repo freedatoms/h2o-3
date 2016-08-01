@@ -19,7 +19,7 @@ public @interface API {
   enum Level {critical, secondary, expert}
 
   /**
-   *  A short help description to appear alongside the field in a UI.
+   * A short help description to appear alongside the field in a UI.
    */
   String help();
 
@@ -41,7 +41,7 @@ public @interface API {
   /**
    * Is this field an input, output or inout?
    */
-  Direction direction() default Direction.INPUT; // TODO: should this be INOUT?
+  Direction direction() default Direction.INPUT;
 
   // The following are markers for *input* fields.
 
@@ -50,6 +50,9 @@ public @interface API {
    * This is used in UIs to tell the user the allowed values, and for validation.
    */
   String[] values() default {};
+
+  /** Proovide values for enum-like types if it cannot be provided as a constant in annotation. */
+  Class<? extends ValuesProvider> valuesProvider() default ValuesProvider.class;
 
   /**
    * Should this field be rendered in the JSON representation?

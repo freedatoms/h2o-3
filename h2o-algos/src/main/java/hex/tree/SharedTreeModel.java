@@ -30,9 +30,12 @@ public abstract class SharedTreeModel<M extends SharedTreeModel<M,P,O>, P extend
 
     public int _nbins_cats = 1024; // Categorical (factor) cols: Build a histogram of this many bins, then split at the best point
 
-    public double _r2_stopping = 0.999999; // Stop when the r^2 metric equals or exceeds this value
+    public double _min_split_improvement = 1e-5; // Minimum relative improvement in squared error reduction for a split to happen
 
-    public long _seed = -1;
+    public enum HistogramType { AUTO, UniformAdaptive, Random, QuantilesGlobal, RoundRobin }
+    public HistogramType _histogram_type = HistogramType.AUTO; // What type of histogram to use for finding optimal split points
+
+    public double _r2_stopping = 0.999999; // Stop when the r^2 metric equals or exceeds this value
 
     public int _nbins_top_level = 1<<10; //hardcoded maximum top-level number of bins for real-valued columns
 
@@ -44,15 +47,14 @@ public abstract class SharedTreeModel<M extends SharedTreeModel<M,P,O>, P extend
 
     public int _score_interval = 4000; //Adding this parameter to take away the hard coded value of 4000 for scoring each iteration every 4 secs
 
-    public float _sample_rate = 0.632f; //fraction of rows to sample for each tree
+    public double _sample_rate = 0.632; //fraction of rows to sample for each tree
 
-    @Override public long progressUnits() { return _ntrees; }
+    public double[] _sample_rate_per_class; //fraction of rows to sample for each tree, per class
 
-    @Override protected long nFoldSeed() {
-      return _seed == -1 ? (_seed = RandomUtils.getRNG(System.nanoTime()).nextLong()) : _seed;
-    }
+    @Override public long progressUnits() { return _ntrees + (_histogram_type==HistogramType.QuantilesGlobal || _histogram_type==HistogramType.RoundRobin ? 1 : 0); }
 
-    public float _col_sample_rate_per_tree = 1.0f; //fraction of columns to sample for each tree
+    public double _col_sample_rate_change_per_level = 1.0f; //relative change of the column sampling rate for every level
+    public double _col_sample_rate_per_tree = 1.0f; //fraction of columns to sample for each tree
 
     /** Fields which can NOT be modified if checkpoint is specified.
      * FIXME: should be defined in Schema API annotation
@@ -242,15 +244,17 @@ public abstract class SharedTreeModel<M extends SharedTreeModel<M,P,O>, P extend
     return res;
   }
 
+  @Override protected double[] score0(double data[], double[] preds, double weight, double offset) {
+    return score0(data,preds,weight,offset,_output._treeKeys.length);
+  }
   @Override protected double[] score0(double data[/*ncols*/], double preds[/*nclasses+1*/]) {
     return score0(data, preds, 1.0, 0.0);
   }
-  @Override
-  protected double[] score0(double[] data, double[] preds, double weight, double offset) {
+  protected double[] score0(double[] data, double[] preds, double weight, double offset, int ntrees) {
     // Prefetch trees into the local cache if it is necessary
     // Invoke scoring
     Arrays.fill(preds,0);
-    for( int tidx=0; tidx<_output._treeKeys.length; tidx++ )
+    for( int tidx=0; tidx<ntrees; tidx++ )
       score0(data, preds, tidx);
     return preds;
   }

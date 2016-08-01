@@ -46,6 +46,11 @@ public interface HyperSpaceWalker<MP extends Model.Parameters, C extends HyperSp
     double max_runtime_secs();
 
     /**
+     * @return the total time allowed for building this grid, in seconds.
+     */
+    int max_models();
+
+    /**
      * @return the time remaining for building this grid, in seconds.
      */
     double time_remaining_secs();
@@ -206,9 +211,11 @@ public interface HyperSpaceWalker<MP extends Model.Parameters, C extends HyperSp
         defaults = (MP) params.getClass().newInstance();
       }
       catch (Exception e) {
-        throw new H2OIllegalArgumentException("Failed to instantiate a new Model.Parameters object to getht edefault values.");
+        throw new H2OIllegalArgumentException("Failed to instantiate a new Model.Parameters object to get the default values.");
       }
 
+      // if a parameter is specified in both model parameter and hyper-parameter, this is only allowed if the
+      // parameter value is set to be default.  Otherwise, an exception will be thrown.
       for (String key : hyperParams.keySet()) {
         // Throw if the user passed an empty value list:
         Object[] values = hyperParams.get(key);
@@ -224,8 +231,8 @@ public interface HyperSpaceWalker<MP extends Model.Parameters, C extends HyperSp
         Object defaultVal = PojoUtils.getFieldValue(defaults, prefix + key, PojoUtils.FieldNaming.CONSISTENT);
         Object actualVal = PojoUtils.getFieldValue(params, prefix + key, PojoUtils.FieldNaming.CONSISTENT);
 
-        if (defaultVal != null && actualVal != null && !Arrays.asList(values).contains(actualVal)) {
-          // both are set
+        if (defaultVal != null && actualVal != null) {
+          // both are not set to null
           if (defaultVal.getClass().isArray() &&
               // array
               !PojoUtils.arraysEquals(defaultVal, actualVal)) {
@@ -238,8 +245,8 @@ public interface HyperSpaceWalker<MP extends Model.Parameters, C extends HyperSp
           } // ! array
         } // both are set: defaultVal != null && actualVal != null
 
-        // TODO: contains probably doesn't work properly with arrays
-        if (defaultVal == null && !(actualVal == null) && !Arrays.asList(values).contains(actualVal)) {
+        // defaultVal is null but actualVal is not, raise exception
+        if (defaultVal == null && !(actualVal == null)) {
           // only actual is set
             throw new H2OIllegalArgumentException("Grid search model parameter '" + key + "' is set in both the model parameters and in the hyperparameters map.  This is ambiguous; set it in one place or the other, not both.");
         }
@@ -272,6 +279,11 @@ public interface HyperSpaceWalker<MP extends Model.Parameters, C extends HyperSp
       for (int i = 0; i < _hyperParamNames.length; i++) {
         String paramName = _hyperParamNames[i];
         Object paramValue = hyperParams[i];
+
+        if (paramName.equals("valid")) {  // change paramValue to key<Frame> for validation_frame
+          paramName = "validation_frame";   // @#$, paramsSchema is still using validation_frame and training_frame
+        }
+
         paramsBuilder.set(paramName, paramValue);
       }
       return paramsBuilder.build();
@@ -298,7 +310,7 @@ public interface HyperSpaceWalker<MP extends Model.Parameters, C extends HyperSp
     protected int integerHash(int[] ar) {
       Integer[] hashMe = new Integer[ar.length];
       for (int i = 0; i < ar.length; i++)
-        hashMe[i] = ar[i];
+        hashMe[i] = ar[i] * _hyperParams.get(_hyperParamNames[i]).length;
       return Arrays.deepHashCode(hashMe);
     }
   }
@@ -364,6 +376,8 @@ public interface HyperSpaceWalker<MP extends Model.Parameters, C extends HyperSp
 
         @Override
         public double max_runtime_secs() { return Double.MAX_VALUE; }
+
+        public int max_models() { return _maxHyperSpaceSize > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int)_maxHyperSpaceSize; }
 
         @Override
         public void modelFailed(Model failedModel) {
@@ -434,7 +448,7 @@ public interface HyperSpaceWalker<MP extends Model.Parameters, C extends HyperSp
                                    search_criteria().stopping_rounds(),
                                    model._output.isClassifier(),
                                    search_criteria().stopping_metric(),
-                                   search_criteria().stopping_tolerance(), "grid's best");
+                                   search_criteria().stopping_tolerance(), "grid's best", true);
     }
 
     @Override
@@ -480,7 +494,9 @@ public interface HyperSpaceWalker<MP extends Model.Parameters, C extends HyperSp
           // we compare _visitedPermutationHashes.size() to _maxHyperSpaceSize because we want to stop when we have attempted each combo.
           //
           // _currentPermutationNum is 1-based
-          return (_visitedPermutationHashes.size() < _maxHyperSpaceSize && _currentPermutationNum < search_criteria().max_models());
+          return (_visitedPermutationHashes.size() < _maxHyperSpaceSize &&
+                  (search_criteria().max_models() == 0 || _currentPermutationNum < search_criteria().max_models())
+          );
         }
 
         @Override
@@ -494,6 +510,10 @@ public interface HyperSpaceWalker<MP extends Model.Parameters, C extends HyperSp
 
         public double max_runtime_secs() {
           return search_criteria().max_runtime_secs();
+        }
+
+        public int max_models() {
+          return search_criteria().max_models();
         }
 
         @Override

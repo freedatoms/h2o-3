@@ -11,22 +11,27 @@ import java.util.ArrayList;
 public class ASTFun extends AST {
   final String[] _ids;          // Identifier names
   final AST _body;              // The function body
-
-  // If this function is being evaluated, record the arguments and parent
-  // lexical scope
+  // If this function is being evaluated, record the arguments and parent lexical scope
   final Val[] _args;            // Evaluated arguments to a function
   final ASTFun _parent;         // Parent lexical scope
 
-  protected ASTFun( Exec e ) { 
+  public ASTFun() {
+    _ids = null;
+    _body = null;
+    _args = null;
+    _parent = null;
+  }
+
+  protected ASTFun(Rapids e) {
     e.xpeek('{');
     ArrayList<String> ids = new ArrayList<>();
     ids.add("");                // 1-based ID list
 
     while( e.skipWS()!= '.' ) {
       String id = e.token();
-      if( !Character.isJavaIdentifierStart(id.charAt(0)) ) throw new Exec.IllegalASTException("variable must be a valid Java identifier: "+id);
+      if( !Character.isJavaIdentifierStart(id.charAt(0)) ) throw new Rapids.IllegalASTException("variable must be a valid Java identifier: "+id);
       for( char c : id.toCharArray() )
-        if( !Character.isJavaIdentifierPart(c) ) throw new Exec.IllegalASTException("variable must be a valid Java identifier: "+id);
+        if( !Character.isJavaIdentifierPart(c) ) throw new Rapids.IllegalASTException("variable must be a valid Java identifier: "+id);
       ids.add(id);
     }
     e.xpeek('.');
@@ -47,6 +52,16 @@ public class ASTFun extends AST {
     return sb.toString();
   }
 
+  @Override public String example() {
+    return "{ ...args . expr }";
+  }
+  @Override public String description() {
+    return "Function definition: a list of tokens in curly braces. All initial tokens (which must be valid " +
+        "identifiers) become function arguments, then a single dot '.' must follow, and finally an expression which " +
+        "is the body of the function. Functions with variable number of arguments are not supported. Example: " +
+        "squaring function `{x . (^ x 2)}`";
+  }
+
   // Print environment
   private void penv( SB sb ) {
     if( _parent != null ) _parent.penv(sb);
@@ -57,8 +72,7 @@ public class ASTFun extends AST {
 
   // Function execution.  Just throw self on stack like a constant.  However,
   // capture the existing global scope.
-  @Override
-  public Val exec(Env env) { return new ValFun(new ASTFun(this,null,env._scope)); }
+  @Override public Val exec(Env env) { return new ValFun(new ASTFun(this,null,env._scope)); }
 
   // Expected argument count, plus self
   @Override int nargs() { return _ids.length; }

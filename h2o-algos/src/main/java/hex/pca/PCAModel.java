@@ -18,7 +18,7 @@ public class PCAModel extends Model<PCAModel,PCAModel.PCAParameters,PCAModel.PCA
 
   public static class PCAParameters extends Model.Parameters {
     public String algoName() { return "PCA"; }
-    public String fullName() { return "Principle Components Analysis"; }
+    public String fullName() { return "Principal Components Analysis"; }
     public String javaName() { return PCAModel.class.getName(); }
     @Override public long progressUnits() { return _pca_method == PCAParameters.Method.GramSVD ? 5 : 3; }
 
@@ -26,7 +26,6 @@ public class PCAModel extends Model<PCAModel,PCAModel.PCAParameters,PCAModel.PCA
     public Method _pca_method = Method.GramSVD;   // Method for computing PCA
     public int _k = 1;                     // Number of principal components
     public int _max_iterations = 1000;     // Max iterations
-    public long _seed = System.nanoTime(); // RNG seed
     public boolean _use_all_factor_levels = false;   // When expanding categoricals, should first level be kept or dropped?
     public boolean _compute_metrics = true;   // Should a second pass be made through data to compute metrics?
     public boolean _impute_missing = false;   // Should missing numeric values be imputed with the column mean?
@@ -34,7 +33,6 @@ public class PCAModel extends Model<PCAModel,PCAModel.PCAParameters,PCAModel.PCA
     public enum Method {
       GramSVD, Power, Randomized, GLRM
     }
-    @Override protected long nFoldSeed() { return _seed; }
   }
 
   public static class PCAOutput extends Model.Output {

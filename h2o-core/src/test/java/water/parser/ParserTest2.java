@@ -2,8 +2,14 @@ package water.parser;
 
 import org.junit.*;
 
+import java.util.Random;
+import java.util.UUID;
+
 import water.*;
 import water.fvec.*;
+import water.util.PrettyPrint;
+
+import static water.parser.DefaultParserProviders.CSV_INFO;
 
 public class ParserTest2 extends TestUtil {
   @BeforeClass
@@ -44,7 +50,7 @@ public class ParserTest2 extends TestUtil {
     };
 
     Key rkey = ParserTest.makeByteVec(data);
-    ParseSetup ps = new ParseSetup(ParserType.CSV, (byte)',', false, ParseSetup.HAS_HEADER, 9,
+    ParseSetup ps = new ParseSetup(CSV_INFO, (byte)',', false, ParseSetup.HAS_HEADER, 9,
             new String[]{"'C1Chunk'","C1SChunk", "'C2Chunk'", "'C2SChunk'", "'C4Chunk'", "'C4FChunk'", "'C8Chunk'", "'C8DChunk'", "'Categorical'"},
             ParseSetup.strToColumnTypes(new String[]{"Numeric", "Numeric", "Numeric", "Numeric", "Numeric", "Numeric", "Numeric", "Numeric", "Enum"}), null, null, null);
     Frame fr = ParseDataset.parse(Key.make("na_test.hex"), new Key[]{rkey}, true, ps);
@@ -70,7 +76,7 @@ public class ParserTest2 extends TestUtil {
                                               ar("'Tomas''s","test2'","test2",null),
                                               ar("last","'line''s","trailing","piece'") };
     Key k = ParserTest.makeByteVec(data);
-    ParseSetup gSetupF = ParseSetup.guessSetup(data[0].getBytes(),ParserType.CSV, (byte)',', 4, false/*single quote*/, ParseSetup.NO_HEADER, null, null, null, null);
+    ParseSetup gSetupF = ParseSetup.guessSetup(data[0].getBytes(), CSV_INFO, (byte)',', 4, false/*single quote*/, ParseSetup.NO_HEADER, null, null, null, null);
     gSetupF._column_types = ParseSetup.strToColumnTypes(new String[]{"Enum", "Enum", "Enum", "Enum"});
     Frame frF = ParseDataset.parse(Key.make(), new Key[]{k}, false, gSetupF);
     testParsed(frF,expectFalse);
@@ -78,7 +84,7 @@ public class ParserTest2 extends TestUtil {
     String[][] expectTrue = new String[][] { ar("Tomass,test,first,line", null),
                                              ar("Tomas''stest2","test2"),
                                              ar("last", "lines trailing piece") };
-    ParseSetup gSetupT = ParseSetup.guessSetup(data[0].getBytes(),ParserType.CSV, (byte)',', 2, true/*single quote*/, ParseSetup.NO_HEADER, null, null, null, null);
+    ParseSetup gSetupT = ParseSetup.guessSetup(data[0].getBytes(), CSV_INFO, (byte)',', 2, true/*single quote*/, ParseSetup.NO_HEADER, null, null, null, null);
     gSetupT._column_types = ParseSetup.strToColumnTypes(new String[]{"Enum", "Enum", "Enum", "Enum"});
     Frame frT = ParseDataset.parse(Key.make(), new Key[]{k}, true, gSetupT);
     //testParsed(frT,expectTrue);  // not currently passing
@@ -231,5 +237,24 @@ public class ParserTest2 extends TestUtil {
     };
     Key k = ParserTest.makeByteVec(data);
     ParserTest.testParsed(ParseDataset.parse(Key.make(), k),exp,33);
+  }
+
+  @Ignore
+  public void testSpeedOfCategoricalUpdate() {
+    Categorical cat = new Categorical();
+    int numOfUniqueCats = 363;
+    String values[] = new String[numOfUniqueCats];
+    for (int i = 0; i< numOfUniqueCats; i++) values[i] = UUID.randomUUID().toString();
+    int numOfIterations = 1000000000;
+    Random random = new Random(0xf267deadbabecafeL);
+    BufferedString bs = new BufferedString();
+    long startTime = System.currentTimeMillis();
+    for (int i = 0; i < numOfIterations; i++) {
+      int idx = random.nextInt(numOfUniqueCats);
+      bs.set(values[idx].getBytes());
+      cat.addKey(bs);
+      if (i % 10000000 == 0) System.out.println("Iterations: " + i);
+    }
+    System.out.println("Time: " + PrettyPrint.msecs(System.currentTimeMillis() - startTime, false));
   }
 }

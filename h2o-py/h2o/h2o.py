@@ -29,6 +29,7 @@ from .estimators.glrm import H2OGeneralizedLowRankEstimator
 from .estimators.kmeans import H2OKMeansEstimator
 from .estimators.naive_bayes import H2ONaiveBayesEstimator
 from .estimators.random_forest import H2ORandomForestEstimator
+from .grid.grid_search import H2OGridSearch
 from .transforms.decomposition import H2OPCA
 from .transforms.decomposition import H2OSVD
 
@@ -51,8 +52,9 @@ def _import(path):
 
 
 def upload_file(path, destination_frame="", header=(-1,0,1), sep="", col_names=None, col_types=None, na_strings=None):
-  """Upload a dataset at the path given from the local machine to the H2O cluster.
-
+  """Upload a dataset at the path given from the local machine to the H2O cluster. Does a single-threaded push to H2O.
+  Also see import_file. 
+  
   Parameters
   ----------
     path : str
@@ -110,7 +112,8 @@ def import_file(path=None, destination_frame="", parse=True, header=(-1, 0, 1), 
                 col_names=None, col_types=None, na_strings=None):
     """Have H2O import a dataset into memory. The path to the data must be a valid path for
     each node in the H2O cluster. If some node in the H2O cluster cannot see the file, then
-    an exception will be thrown by the H2O cluster.
+    an exception will be thrown by the H2O cluster. Does a parallel/distributed multi-threaded pull 
+    of the data. Also see upload_file.
 
     Parameters
     ----------
@@ -165,6 +168,102 @@ def import_file(path=None, destination_frame="", parse=True, header=(-1, 0, 1), 
     return H2OFrame()._import_parse(path, destination_frame, header, sep, col_names,
                                     col_types, na_strings)
 
+def import_sql_table(connection_url, table, username, password, columns=None, optimize=None):
+  """Import SQL table to H2OFrame in memory. Assumes that the SQL table is not being updated and is stable.
+  Runs multiple SELECT SQL queries concurrently for parallel ingestion. 
+  Be sure to start the h2o.jar in the terminal with your downloaded JDBC driver in the classpath: 
+    `java -cp <path_to_h2o_jar>:<path_to_jdbc_driver_jar> water.H2OApp`
+  Also see h2o.import_sql_select.
+  Currently supported SQL databases are MySQL, PostgreSQL, and MariaDB. Support for Oracle 12g and Microsoft SQL Server 
+  is forthcoming.
+  
+  Parameters
+  ----------
+    connection_url : str
+      URL of the SQL database connection as specified by the Java Database Connectivity (JDBC) Driver.
+      For example, "jdbc:mysql://localhost:3306/menagerie?&useSSL=false"
+      
+    table : str
+      Name of SQL table
+      
+    username : str
+      Username for SQL server
+      
+    password : str
+      Password for SQL server
+      
+    columns : list of strings, optional
+      A list of column names to import from SQL table. Default is to import all columns.
+      
+    optimize : bool, optional, default is True
+      Optimize import of SQL table for faster imports. Experimental.  
+      
+  Returns
+  -------
+    H2OFrame containing data of specified SQL table
+  
+  Examples
+  --------
+    >>> conn_url = "jdbc:mysql://172.16.2.178:3306/ingestSQL?&useSSL=false"
+    >>> table = "citibike20k"
+    >>> username = "root"
+    >>> password = "abc123"
+    >>> my_citibike_data = h2o.import_sql_table(conn_url, table, username, password)
+  """
+  if columns is not None: 
+    if not isinstance(columns, list): raise ValueError("`columns` must be a list of column names")
+    columns = ', '.join(columns)
+  p = {}
+  p.update({k:v for k,v in locals().items() if k is not "p"})
+  p["_rest_version"] = 99
+  j = H2OJob(H2OConnection.post_json(url_suffix="ImportSQLTable", **p), "Import SQL Table").poll()
+  return get_frame(j.dest_key)
+
+def import_sql_select(connection_url, select_query, username, password, optimize=None):
+  """Imports the SQL table that is the result of the specified SQL query to H2OFrame in memory. 
+  Creates a temporary SQL table from the specified sql_query.
+  Runs multiple SELECT SQL queries on the temporary table concurrently for parallel ingestion, then drops the table. 
+  Be sure to start the h2o.jar in the terminal with your downloaded JDBC driver in the classpath: 
+    `java -cp <path_to_h2o_jar>:<path_to_jdbc_driver_jar> water.H2OApp`
+  Also see h2o.import_sql_table.
+  Currently supported SQL databases are MySQL, PostgreSQL, and MariaDB. Support for Oracle 12g and Microsoft SQL Server 
+  is forthcoming.
+  
+  Parameters
+  ----------
+    connection_url : str
+      URL of the SQL database connection as specified by the Java Database Connectivity (JDBC) Driver.
+      For example, "jdbc:mysql://localhost:3306/menagerie?&useSSL=false"
+      
+    select_query : str
+      SQL query starting with `SELECT` that returns rows from one or more database tables.
+      
+    username : str
+      Username for SQL server
+      
+    password : str
+      Password for SQL server
+      
+    optimize : bool, optional, default is True
+      Optimize import of SQL table for faster imports. Experimental.  
+      
+  Returns
+  -------
+    H2OFrame containing data of specified SQL select query
+    
+  Examples
+  --------
+    >>> conn_url = "jdbc:mysql://172.16.2.178:3306/ingestSQL?&useSSL=false"
+    >>> select_query = "SELECT bikeid from citibike20k"
+    >>> username = "root"
+    >>> password = "abc123"
+    >>> my_citibike_data = h2o.import_sql_select(conn_url, select_query, username, password)
+  """
+  p = {}
+  p.update({k:v for k,v in locals().items() if k is not "p"})
+  p["_rest_version"] = 99
+  j = H2OJob(H2OConnection.post_json(url_suffix="ImportSQLTable", **p), "Import SQL Table").poll()
+  return get_frame(j.dest_key)
 
 def parse_setup(raw_frames, destination_frame="", header=(-1,0,1), separator="", column_names=None, column_types=None, na_strings=None):
   """During parse setup, the H2O cluster will make several guesses about the attributes of
@@ -355,6 +454,34 @@ def get_model(model_id):
   m._resolve_model(model_id, model_json)
   return m
 
+def get_grid(grid_id):
+  """Return the specified grid
+
+  Parameters
+  ----------
+    grid_id : str
+      The grid identification in h2o
+
+  Returns
+  -------
+    H2OGridSearch instance
+  """
+  grid_json = H2OConnection.get_json("Grids/"+grid_id, _rest_version=99)
+  models = [get_model(key['name']) for key in grid_json['model_ids']]
+  #get first model returned in list of models from grid search to get model class (binomial, multinomial, etc)
+  first_model_json = H2OConnection.get_json("Models/"+grid_json['model_ids'][0]['name'])['models'][0]
+  gs = H2OGridSearch(None, {}, grid_id)
+  gs._resolve_grid(grid_id, grid_json, first_model_json)
+  gs.models = models
+  hyper_params = {param:set() for param in gs.hyper_names}
+  for param in gs.hyper_names:
+    for model in models:
+      hyper_params[param].add(model.full_parameters[param][u'actual_value'][0])
+  hyper_params = {str(param):list(vals) for param, vals in hyper_params.items()}
+  gs.hyper_params = hyper_params
+  gs.model = model.__class__()
+  return gs
+  
 
 def get_frame(frame_id):
   """Obtain a handle to the frame in H2O with the frame_id key.
@@ -565,7 +692,7 @@ def download_all_logs(dirname=".", filename=None):
   -------
     Path of logs written.
   """
-  url = 'http://{}:{}/Logs/download'.format(H2OConnection.ip(),H2OConnection.port())
+  url = 'http://{}:{}/3/Logs/download'.format(H2OConnection.ip(),H2OConnection.port())
   opener = urlopen()
   response = opener(url)
 
@@ -659,7 +786,7 @@ def cluster_status():
 def init(ip="localhost", port=54321, start_h2o=True, enable_assertions=True,
          license=None, nthreads=-1, max_mem_size=None, min_mem_size=None, ice_root=None, 
          strict_version_check=True, proxy=None, https=False, insecure=False, username=None, 
-         password=None, max_mem_size_GB=None, min_mem_size_GB=None, proxies=None, size=None):
+         password=None, cluster_name=None, max_mem_size_GB=None, min_mem_size_GB=None, proxies=None, size=None):
   """Initiate an H2O connection to the specified ip and port.
 
   Parameters
@@ -698,6 +825,8 @@ def init(ip="localhost", port=54321, start_h2o=True, enable_assertions=True,
     Username to login with.
   password : str
     Password to login with.
+  cluster_name : str
+    Cluster to login to.
   max_mem_size_GB : DEPRECATED
     Use max_mem_size instead.
   min_mem_size_GB : DEPRECATED
@@ -721,7 +850,7 @@ def init(ip="localhost", port=54321, start_h2o=True, enable_assertions=True,
   H2OConnection(ip=ip, port=port,start_h2o=start_h2o,enable_assertions=enable_assertions,license=license,
                 nthreads=nthreads,max_mem_size=max_mem_size,min_mem_size=min_mem_size,ice_root=ice_root,
                 strict_version_check=strict_version_check,proxy=proxy,https=https,insecure=insecure,username=username,
-                password=password,max_mem_size_GB=max_mem_size_GB,min_mem_size_GB=min_mem_size_GB,proxies=proxies,size=size)
+                password=password,cluster_name=cluster_name,max_mem_size_GB=max_mem_size_GB,min_mem_size_GB=min_mem_size_GB,proxies=proxies,size=size)
   return None
 
 
@@ -843,7 +972,7 @@ def create_frame(id = None, rows = 10000, cols = 10, randomize = True, value = 0
     -------
       H2OFrame
     """
-    parms = {"dest": _py_tmp_key() if id is None else id,
+    parms = {"dest": _py_tmp_key(append=H2OConnection.session_id()) if id is None else id,
          "rows": rows,
          "cols": cols,
          "randomize": randomize,
@@ -901,7 +1030,7 @@ def interaction(data, factors, pairwise, max_factors, min_occurrence, destinatio
     H2OFrame
   """
   factors = [data.names[n] if isinstance(n,int) else n for n in factors]
-  parms = {"dest": _py_tmp_key() if destination_frame is None else destination_frame,
+  parms = {"dest": _py_tmp_key(append=H2OConnection.session_id()) if destination_frame is None else destination_frame,
            "source_frame": data.frame_id,
            "factor_columns": [_quoted(f) for f in factors],
            "pairwise": pairwise,

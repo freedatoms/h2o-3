@@ -5,7 +5,7 @@ import hex.quantile.Quantile;
 import hex.quantile.QuantileModel;
 import hex.schemas.DeepLearningModelV3;
 import water.*;
-import water.api.ModelSchema;
+import water.api.schemas3.ModelSchemaV3;
 import water.codegen.CodeGenerator;
 import water.codegen.CodeGeneratorPipeline;
 import water.exceptions.H2OIllegalArgumentException;
@@ -83,7 +83,7 @@ public class DeepLearningModel extends Model<DeepLearningModel,DeepLearningModel
   }
 
   // Default publicly visible Schema is V2
-  public ModelSchema schema() { return new DeepLearningModelV3(); }
+  public ModelSchemaV3 schema() { return new DeepLearningModelV3(); }
 
   void set_model_info(DeepLearningModelInfo mi) {
     assert(mi != null);
@@ -481,7 +481,7 @@ public class DeepLearningModel extends Model<DeepLearningModel,DeepLearningModel
           stopped_early = true;
         }
         if (ScoreKeeper.stopEarly(ScoringInfo.scoreKeepers(scoring_history()),
-                get_params()._stopping_rounds, _output.isClassifier(), get_params()._stopping_metric, get_params()._stopping_tolerance, "model's last"
+                get_params()._stopping_rounds, _output.isClassifier(), get_params()._stopping_metric, get_params()._stopping_tolerance, "model's last", true
         )) {
           Log.info("Convergence detected based on simple moving average of the loss function for the past " + get_params()._stopping_rounds + " scoring events. Model building completed.");
           stopped_early = true;
@@ -739,7 +739,7 @@ public class DeepLearningModel extends Model<DeepLearningModel,DeepLearningModel
 
     Frame res = new Frame(destination_key, names, mse.vecs());
     DKV.put(res);
-    _output.addModelMetrics(new ModelMetricsAutoEncoder(this, frame, res.vecs()[0].mean() /*mean MSE*/));
+    _output.addModelMetrics(new ModelMetricsAutoEncoder(this, frame, res.numRows(), res.vecs()[0].mean() /*mean MSE*/));
     return res;
   }
 
@@ -1179,7 +1179,7 @@ public class DeepLearningModel extends Model<DeepLearningModel,DeepLearningModel
     }
     if (p._hidden_dropout_ratios != null) {
       bodySb.i(3).p("if (i<ACTIVATION.length-1) {").nl();
-      bodySb.i(4).p("ACTIVATION[i][r] *= HIDDEN_DROPOUT_RATIOS[i-1];").nl();
+      bodySb.i(4).p("ACTIVATION[i][r] *= 1 - HIDDEN_DROPOUT_RATIOS[i-1];").nl();
       bodySb.i(3).p("}").nl();
     }
     bodySb.i(2).p("}").nl();
@@ -1349,20 +1349,7 @@ public class DeepLearningModel extends Model<DeepLearningModel,DeepLearningModel
     public long _train_samples_per_iteration = -2;
   
     public double _target_ratio_comm_to_comp = 0.05;
-  
-    /**
-     * The random seed controls sampling and initialization. Reproducible
-     * results are only expected with single-threaded operation (i.e.,
-     * when running on one node, turning off load balancing and providing
-     * a small dataset that fits in one chunk).  In general, the
-     * multi-threaded asynchronous updates to the model parameters will
-     * result in (intentional) race conditions and non-reproducible
-     * results. Note that deterministic sampling and initialization might
-     * still lead to some weak sense of determinism in the model.
-     */
-    public long _seed = RandomUtils.getRNG(System.nanoTime()).nextLong();
-    @Override protected long nFoldSeed() { return _seed; }
-  
+
   /*Adaptive Learning Rate*/
     /**
      * The implemented adaptive learning rate algorithm (ADADELTA) automatically
@@ -1707,7 +1694,6 @@ public class DeepLearningModel extends Model<DeepLearningModel,DeepLearningModel
     void validate(DeepLearning dl, boolean expensive) {
       boolean classification = expensive || dl.nclasses() != 0 ? dl.isClassifier() : _loss == Loss.CrossEntropy;
       if (_hidden == null || _hidden.length == 0) dl.error("_hidden", "There must be at least one hidden layer.");
-  
       for (int h : _hidden) if (h <= 0) dl.error("_hidden", "Hidden layer size must be positive.");
       if (_mini_batch_size < 1)
         dl.error("_mini_batch_size", "Mini-batch size must be >= 1");

@@ -41,12 +41,12 @@ dependencies {
   compile 'ai.h2o:reflections:0.9.11-h2o-custom'
 
   // Jets3t is required by S3N support
-  compile 'net.java.dev.jets3t:jets3t:0.6.1'
+  // compile 'net.java.dev.jets3t:jets3t:0.6.1'
 
   testCompile "junit:junit:${junitVersion}"
 }
 
-apply from: '../gradle/dataCheck.gradle'
+apply from: "${rootDir}/gradle/dataCheck.gradle"
 
 javadoc {
   exclude "**/fvec/C*Chunk.java/**"

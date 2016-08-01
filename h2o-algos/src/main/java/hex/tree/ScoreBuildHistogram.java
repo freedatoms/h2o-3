@@ -6,7 +6,6 @@ import water.MRTask;
 import water.fvec.C0DChunk;
 import water.fvec.Chunk;
 import water.util.ArrayUtils;
-import water.util.AtomicUtils;
 
 /**  Score and Build Histogram
  *
@@ -42,8 +41,11 @@ public class ScoreBuildHistogram extends MRTask<ScoreBuildHistogram> {
   // Histograms for every tree, split & active column
   final DHistogram _hcs[/*tree-relative node-id*/][/*column*/];
   final Distribution.Family _family;
+  final int _weightIdx;
+  final int _workIdx;
+  final int _nidIdx;
 
-  public ScoreBuildHistogram(H2OCountedCompleter cc, int k, int ncols, int nbins, int nbins_cats, DTree tree, int leaf, DHistogram hcs[][], Distribution.Family family) {
+  public ScoreBuildHistogram(H2OCountedCompleter cc, int k, int ncols, int nbins, int nbins_cats, DTree tree, int leaf, DHistogram hcs[][], Distribution.Family family, int weightIdx, int workIdx, int nidIdx) {
     super(cc);
     _k    = k;
     _ncols= ncols;
@@ -53,12 +55,21 @@ public class ScoreBuildHistogram extends MRTask<ScoreBuildHistogram> {
     _leaf = leaf;
     _hcs  = hcs;
     _family = family;
+    _weightIdx = weightIdx;
+    _workIdx = workIdx;
+    _nidIdx = nidIdx;
   }
 
   /** Marker for already decided row. */
   static public final int DECIDED_ROW = -1;
   /** Marker for sampled out rows */
   static public final int OUT_OF_BAG = -2;
+  /** Marker for rows without a response */
+  static public final int MISSING_RESPONSE = -1;
+  /** Marker for a fresh tree */
+  static public final int UNDECIDED_CHILD_NODE_ID = -1; //Integer.MIN_VALUE;
+
+  static public final int FRESH = 0;
 
   static public boolean isOOBRow(int nid)     { return nid <= OUT_OF_BAG; }
   static public boolean isDecidedRow(int nid) { return nid == DECIDED_ROW; }
@@ -86,9 +97,9 @@ public class ScoreBuildHistogram extends MRTask<ScoreBuildHistogram> {
   }
 
   @Override final public void map( Chunk[] chks ) {
-    final Chunk wrks = chks[_ncols+2]; //fitting target (same as response for DRF, residual for GBM)
-    final Chunk nids = chks[_ncols+3];
-    final Chunk weight = chks.length >= _ncols+5 ? chks[_ncols+4] : new C0DChunk(1, chks[0].len());
+    final Chunk wrks = chks[_workIdx];
+    final Chunk nids = chks[_nidIdx];
+    final Chunk weight = _weightIdx>=0 ? chks[_weightIdx] : new C0DChunk(1, chks[0].len());
 
     // Pass 1: Score a prior partially-built tree model, and make new Node
     // assignments to every row.  This involves pulling out the current
@@ -99,8 +110,11 @@ public class ScoreBuildHistogram extends MRTask<ScoreBuildHistogram> {
     if( _leaf > 0)            // Prior pass exists?
       score_decide(chks,nids,nnids);
     else                      // Just flag all the NA rows
-      for( int row=0; row<nids._len; row++ )
-        if( isDecidedRow((int)nids.atd(row)) ) nnids[row] = -1;
+      for( int row=0; row<nids._len; row++ ) {
+        if( weight.atd(row) == 0) continue;
+        if( isDecidedRow((int)nids.atd(row)) )
+          nnids[row] = DECIDED_ROW;
+      }
 
     // Pass 2: accumulate all rows, cols into histograms
 //    if (_subset)
@@ -141,7 +155,7 @@ public class ScoreBuildHistogram extends MRTask<ScoreBuildHistogram> {
       boolean oob = isOOBRow(nid);
       if( oob ) nid = oob2Nid(nid); // sampled away - we track the position in the tree
       DTree.DecidedNode dn = _tree.decided(nid);
-      if( dn._split._col == -1 ) { // Might have a leftover non-split
+      if( dn == null || dn._split == null ) { // Might have a leftover non-split
         if( DTree.isRootNode(dn) ) { nnids[row] = nid-_leaf; continue; }
         nid = dn._pid;             // Use the parent split decision then
         int xnid = oob ? nid2Oob(nid) : nid;
@@ -151,7 +165,7 @@ public class ScoreBuildHistogram extends MRTask<ScoreBuildHistogram> {
       }
 
       assert !isDecidedRow(nid);
-      nid = dn.ns(chks,row); // Move down the tree 1 level
+      nid = dn.getChildNodeID(chks,row); // Move down the tree 1 level
       if( !isDecidedRow(nid) ) {
         if( oob ) nid = nid2Oob(nid); // Re-apply OOB encoding
         nids.set(row, nid);
@@ -203,7 +217,9 @@ public class ScoreBuildHistogram extends MRTask<ScoreBuildHistogram> {
     // Sort the rows by NID, so we visit all the same NIDs in a row
     // Find the count of unique NIDs in this chunk
     int nh[] = new int[_hcs.length+1];
-    for( int i : nnids ) if( i >= 0 ) nh[i+1]++;
+    for( int i : nnids )
+      if( i >= 0 )
+        nh[i+1]++;
     // Rollup the histogram of rows-per-NID in this chunk
     for( int i=0; i<_hcs.length; i++ ) nh[i+1] += nh[i];
     // Splat the rows into NID-groups
@@ -219,14 +235,12 @@ public class ScoreBuildHistogram extends MRTask<ScoreBuildHistogram> {
     double bins[] = new double[Math.max(_nbins, _nbins_cats)];
     double sums[] = new double[Math.max(_nbins, _nbins_cats)];
     double ssqs[] = new double[Math.max(_nbins, _nbins_cats)];
-    int binslen = bins.length;
     int cols = _ncols;
     int hcslen = hcs.length;
 
     double[] ws = new double[chks[0]._len];
     double[] cs = new double[chks[0]._len];
     double[] ys = new double[chks[0]._len];
-    //Note: for (n) for (c) is faster than for(c) for(n) for Airlines and MNIST data for DRF and GBM and stochastic GBM
     weight.getDoubles(ws,0,ws.length);
     wrks.getDoubles(ys,0,ys.length);
     for (int c = 0; c < cols; c++) {
@@ -238,56 +252,21 @@ public class ScoreBuildHistogram extends MRTask<ScoreBuildHistogram> {
             chks[c].getDoubles(cs, 0, cs.length);
             extracted = true;
           }
-          overAllRows(cs, ys, ws, rows, hcs[n][c], n == 0 ? 0 : nh[n - 1], nh[n], bins, sums, ssqs, binslen);
+          overAllRows(cs, ys, ws, rows, hcs[n][c], n == 0 ? 0 : nh[n - 1], nh[n], bins, sums, ssqs);
         }
       }
     }
   }
 
-  private static void overAllRows(double [] cs, double [] ys, double [] ws, int[] rows, final DHistogram rh, int lo, int hi, double[] bins, double[] sums, double[] ssqs, int binslen) {
+  private static void overAllRows(double [] cs, double [] ys, double [] ws, int[] rows, final DHistogram rh, int lo, int hi, double[] bins, double[] sums, double[] ssqs) {
     if( rh==null ) return; // Ignore untracked columns in this split
-    double[] rhbins = rh._bins;
-    int rhbinslen = rhbins.length;
-    double min = rh._min2;
-    double max = rh._maxIn;
-    // While most of the time we are limited to nbins, we allow more bins
-    // in a few cases (top-level splits have few total bins across all
-    // the (few) splits) so it's safe to bin more; also categoricals want
-    // to split one bin-per-level no matter how many levels).
-    if( rhbinslen >= binslen) { // Grow bins if needed
+    int rhbinslen = rh._w.length;
+    if( rhbinslen > bins.length) { // Grow bins if needed, otherwise re-use exiting arrays for speed
       bins = new double[rhbinslen];
       sums = new double[rhbinslen];
       ssqs = new double[rhbinslen];
     }
-    double minmax[] = new double[]{min,max};
-    fillLocalHistoForNode(bins, sums, ssqs, ws, cs, ys, rh, rows, hi, lo, minmax);
-    // Add all the data into the Histogram (atomically add)
-    rh.setMin(minmax[0]);       // Track actual lower/upper bound per-bin
-    rh.setMax(minmax[1]);
-    int len = rhbinslen;
-    for( int b=0; b<len; b++ ) { // Bump counts in bins
-      if( bins[b] != 0 ) { AtomicUtils.DoubleArray.add(rhbins,b,bins[b]); bins[b]=0; }
-      if( sums[b] != 0 || ssqs[b] != 0 ) { rh.incr1(b,sums[b],ssqs[b]); sums[b]=ssqs[b]=0; }
-    }
-  }
-
-  private static void fillLocalHistoForNode(double[] bins, double[] sums, double[] ssqs, double[] ws, double[] cs, double[] ys, DHistogram rh, int [] rows, int hi, int lo, double[] minmax) {
-    // Gather all the data for this set of rows, for 1 column and 1 split/NID
-    // Gather min/max, sums and sum-squares.
-    for(int r = lo; r< hi; ++r) {
-      int k = rows[r];
-      double w = ws[k];
-      if (w == 0) continue;
-      double col_data = cs[k];
-      if( col_data < minmax[0] ) minmax[0] = col_data;
-      if( col_data > minmax[1] ) minmax[1] = col_data;
-      int b = rh.bin(col_data); // Compute bin# via linear interpolation
-      double resp = ys[k];
-      double wy = w*resp;
-      bins[b] += w;                // Bump count in bin
-      sums[b] += wy;
-      ssqs[b] += wy*resp;
-    }
+    rh.updateSharedHistosAndReset(bins, sums, ssqs, ws, cs, ys, rows, hi, lo);
   }
 
 }

@@ -46,18 +46,20 @@ class H2OConnection(object):
   __ENCODING_ERROR__ = "replace"
 
   def __init__(self, ip, port, start_h2o, enable_assertions, license, nthreads, max_mem_size, min_mem_size, ice_root,
-               strict_version_check, proxy, https, insecure, username, password, max_mem_size_GB, min_mem_size_GB, proxies, size):
+               strict_version_check, proxy, https, insecure, username, password, cluster_name, max_mem_size_GB, min_mem_size_GB, proxies, size):
     """
     Instantiate the package handle to the H2O cluster.
     :param ip: An IP address, default is "localhost"
     :param port: A port, default is 54321
-    :param start_h2o: A boolean dictating whether this module should start the H2O jvm. An attempt is made anyways if _connect fails.
+    :param start_h2o: A boolean dictating whether this module should start the H2O jvm.
     :param enable_assertions: If start_h2o, pass `-ea` as a VM option.
     :param license: If not None, is a path to a license file.
     :param nthreads: Number of threads in the thread pool. This relates very closely to the number of CPUs used. 
     -1 means use all CPUs on the host. A positive integer specifies the number of CPUs directly. This value is only used when Python starts H2O.
-    :param max_mem_size: Maximum heap size (jvm option Xmx) in gigabytes.
-    :param min_mem_size: Minimum heap size (jvm option Xms) in gigabytes.
+    :param max_mem_size: Maximum heap size (jvm option Xmx). String specifying the maximum size, in bytes, of the memory allocation pool to H2O.
+    This value must a multiple of 1024 greater than 2MB. Append the letter m or M to indicate megabytes, or g or G to indicate gigabytes.
+    :param min_mem_size: Minimum heap size (jvm option Xms). String specifying the minimum size, in bytes, of the memory allocation pool to H2O.
+    This value must a multiple of 1024 greater than 2MB. Append the letter m or M to indicate megabytes, or g or G to indicate gigabytes.
     :param ice_root: A temporary directory (default location is determined by tempfile.mkdtemp()) to hold H2O log files.
     :param strict_version_check: Setting this to False is unsupported and should only be done when advised by technical support.
     :param proxy: A dictionary with keys 'ftp', 'http', 'https' and values that correspond to a proxy path.
@@ -65,6 +67,7 @@ class H2OConnection(object):
     :param insecure: Set this to True to disable SSL certificate checking.
     :param username: Username to login with.
     :param password: Password to login with. 
+    :param cluster_name: Cluster name to login to.
     :param max_mem_size_GB: DEPRECATED. Use max_mem_size.
     :param min_mem_size_GB: DEPRECATED. Use min_mem_size.
     :param proxies: DEPRECATED. Use proxy.
@@ -99,6 +102,7 @@ class H2OConnection(object):
     self._insecure = insecure
     self._username = username
     self._password = password
+    self._cluster_name = cluster_name
     self._session_id = None
     self._rest_version = __H2O_REST_API_VERSION__
     self._child = getattr(__H2OCONN__, "_child") if hasattr(__H2OCONN__, "_child") else None
@@ -293,8 +297,22 @@ class H2OConnection(object):
       print()
 
     vm_opts = []
-    if mmin: vm_opts += ["-Xms{}g".format(mmin)]
-    if mmax: vm_opts += ["-Xmx{}g".format(mmax)]
+    if mmin:
+      if type(mmin) == int:
+        warnings.warn("User specified min_mem_size should have a trailing letter indicating byte type.\n"
+                      "`m` or `M` indicate megabytes & `g` or `G` indicate gigabytes.\nWill default to gigabytes as byte type.")
+        vm_opts += ["-Xms{}g".format(mmin)]
+      else:
+        vm_opts += ["-Xms{}".format(mmin)]
+
+    if mmax:
+      if type(mmax) == int:
+        warnings.warn("User specified max_mem_size should have a trailing letter indicating byte type.\n"
+                      "`m` or `M` indicate megabytes & `g` or `G` indicate gigabytes.\nWill default to gigabytes as byte type.")
+        vm_opts += ["-Xmx{}g".format(mmax)]
+      else:
+        vm_opts += ["-Xmx{}".format(mmax)]
+
     if ea:   vm_opts += ["-ea"]
 
     h2o_opts = ["-verbose:gc",
@@ -543,6 +561,7 @@ class H2OConnection(object):
     
     query_string = ""
     for k,v in iteritems(kwargs):
+      if v is None: continue #don't send args set to None so backend defaults take precedence
       if isinstance(v, list):
         x = '['
         for l in v:
@@ -555,6 +574,8 @@ class H2OConnection(object):
           x += ','
         x = x[:-1]
         x += ']'
+      elif isinstance(v, dict) and "__meta" in v and v["__meta"]["schema_name"].endswith("KeyV3"):
+        x = v["name"]
       else:
         x = str(v) if PY3 else str(v).encode(H2OConnection.__ENCODING__, errors=H2OConnection.__ENCODING_ERROR__)
       query_string += k+"="+quote(x)+"&"
@@ -618,7 +639,8 @@ class H2OConnection(object):
     
     auth = (self._username, self._password)
     verify = not self._insecure
-    headers = {'User-Agent': 'H2O Python client/'+sys.version.replace('\n','')}
+    cluster = self._cluster_name
+    headers = {'User-Agent': 'H2O Python client/'+sys.version.replace('\n',''), 'X-Cluster': cluster}
     try:
       if method == "GET":
         return requests.get(url, headers=headers, proxies=self._proxy, auth=auth, verify=verify)

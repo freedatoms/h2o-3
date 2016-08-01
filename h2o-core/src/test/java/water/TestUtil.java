@@ -234,6 +234,7 @@ public class TestUtil extends Iced {
   // Shortcuts for initializing constant arrays
   public static String[]   ar (String ...a)   { return a; }
   public static String[][] ar (String[] ...a) { return a; }
+  public static byte  []   ar (byte   ...a)   { return a; }
   public static long  []   ar (long   ...a)   { return a; }
   public static long[][]   ar (long[] ...a)   { return a; }
   public static int   []   ari(int    ...a)   { return a; }
@@ -267,6 +268,8 @@ public class TestUtil extends Iced {
   public static void assertVecEquals(Vec expecteds, Vec actuals, double delta) {
     assertEquals(expecteds.length(), actuals.length());
     for(int i = 0; i < expecteds.length(); i++) {
+      if(expecteds.at(i) != actuals.at(i))
+        System.out.println(i + ": " + expecteds.at(i) + " != " + actuals.at(i) + ", chunkIds = " + expecteds.elem2ChunkIdx(i) + ", " + actuals.elem2ChunkIdx(i) + ", row in chunks = " + (i - expecteds.chunkForRow(i).start()) + ", " + (i - actuals.chunkForRow(i).start()));
       assertEquals(expecteds.at(i), actuals.at(i), delta);
     }
   }

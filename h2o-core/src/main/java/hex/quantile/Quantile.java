@@ -60,11 +60,9 @@ public class Quantile extends ModelBuilder<QuantileModel,QuantileModel.QuantileP
   // ----------------------
   private class QuantileDriver extends Driver {
 
-    @Override public void compute2() {
+    @Override public void computeImpl() {
       QuantileModel model = null;
       try {
-        Scope.enter();
-        _parms.read_lock_frames(_job); // Fetch & read-lock source frame
         init(true);
 
         // The model to be built
@@ -80,7 +78,7 @@ public class Quantile extends ModelBuilder<QuantileModel,QuantileModel.QuantileP
         for( int n=0; n<_ncols; n++ ) {
           if( stop_requested() ) return; // Stopped/cancelled
           Vec vec = vecs[n];
-          if (vec.isBad()) {
+          if (vec.isBad() || vec.isCategorical() || vec.isString() || vec.isTime() || vec.isUUID()) {
             model._output._quantiles[n] = new double[_parms._probs.length];
             Arrays.fill(model._output._quantiles[n], Double.NaN);
             continue;
@@ -112,10 +110,7 @@ public class Quantile extends ModelBuilder<QuantileModel,QuantileModel.QuantileP
         }
       } finally {
         if( model != null ) model.unlock(_job);
-        _parms.read_unlock_frames(_job);
-        Scope.exit(model == null ? null : model._key);
       }
-      tryComplete();
     }
   }
 
@@ -129,6 +124,7 @@ public class Quantile extends ModelBuilder<QuantileModel,QuantileModel.QuantileP
 
     // OUTPUT
     public double[/*strata*/] _quantiles;
+    public int[] _nids;
 
     public StratifiedQuantilesTask(H2O.H2OCountedCompleter cc,
                                    double prob,
@@ -140,22 +136,39 @@ public class Quantile extends ModelBuilder<QuantileModel,QuantileModel.QuantileP
     }
 
     @Override public void compute2() {
-      final int strataMin = _strata == null ? 0 : (int) (Math.max(0,_strata.min()));
-      final int strataMax = _strata == null ? 0 : (int) (Math.max(0,_strata.max()));
+      final int strataMin = (int)_strata.min();
+      final int strataMax = (int)_strata.max();
+      if (strataMin < 0 || strataMax < 0) {
+        Log.warn("No quantiles can be computed since there are no non-OOB rows.");
+        return;
+      }
       final int nstrata = strataMax - strataMin + 1;
-      Log.info("Computing quantiles for " + nstrata + " different strata.");
+      Log.info("Computing quantiles for (up to) " + nstrata + " different strata.");
       _quantiles = new double[nstrata];
+      _nids = new int[nstrata];
       Vec weights = _weights != null ? _weights : _response.makeCon(1);
-      for (int i=strataMin;i<=strataMax;++i) { //loop over nodes
+      for (int i=0;i<nstrata;++i) { //loop over nodes
         Vec newWeights = weights.makeCopy();
         //only keep weights for this stratum (node), set rest to 0
-        if (_strata!=null) new KeepOnlyOneStrata(i).doAll(_strata, newWeights);
+        if (_strata!=null) {
+          _nids[i] = strataMin+i;
+          new KeepOnlyOneStrata(_nids[i]).doAll(_strata, newWeights);
+        }
         double sumRows = new SumWeights().doAll(_response, newWeights).sum;
-        Histo h = new Histo(_response.min(), _response.max(), 0, sumRows, _response.isInt());
-        h.doAll(_response, newWeights);
-        while (Double.isNaN(_quantiles[i-strataMin] = h.findQuantile(_prob, _combine_method)))
-          h = h.refinePass(_prob).doAll(_response, newWeights);
-        newWeights.remove();
+        if (sumRows==0) {
+          // no observations with weight > 0 found - no need to compute quantiles
+          _quantiles[i] = Double.NaN;
+//          Log.warn("No observations in leaf " + _nids[i] + " - all weights are 0.");
+        } else {
+          Histo h = new Histo(_response.min(), _response.max(), 0, sumRows, _response.isInt());
+          h.doAll(_response, newWeights);
+          while (Double.isNaN(_quantiles[i] = h.findQuantile(_prob, _combine_method)))
+            h = h.refinePass(_prob).doAll(_response, newWeights);
+          newWeights.remove();
+          //sanity check quantiles
+          assert (_quantiles[i] <= _response.max() + 1e-6);
+          assert (_quantiles[i] >= _response.min() - 1e-6);
+        }
       }
       if (_weights != weights) weights.remove();
       tryComplete();

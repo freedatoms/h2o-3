@@ -10,6 +10,9 @@ import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 
+import static water.parser.DefaultParserProviders.*;
+import static water.parser.DefaultParserProviders.CSV_INFO;
+
 class CsvParser extends Parser {
   private static final byte GUESS_SEP = ParseSetup.GUESS_SEP;
   private static final int NO_HEADER = ParseSetup.NO_HEADER;
@@ -42,7 +45,7 @@ class CsvParser extends Parser {
     }
 
     // For parsing ARFF
-    if (_setup._parse_type == ParserType.ARFF && _setup._check_header == ParseSetup.HAS_HEADER) state = WHITESPACE_BEFORE_TOKEN;
+    if (_setup._parse_type.equals(ARFF_INFO) && _setup._check_header == ParseSetup.HAS_HEADER) state = WHITESPACE_BEFORE_TOKEN;
 
     int quotes = 0;
     long number = 0;
@@ -571,7 +574,7 @@ MAIN_LOOP:
     for( int i = 0; i < s1.length; ++i ) {
       if( s1[i] == 0 ) continue;   // Separator does not appear; ignore it
       if( s1[max] < s1[i] ) max=i; // Largest count sep on 1st line
-      if( s1[i] == s2[i] ) {       // Sep counts are equal?
+      if( s1[i] == s2[i] && s1[i] >= s1[max]>>1 ) {  // Sep counts are equal?  And at nearly as large as the larger header sep?
         try {
           String[] t1 = determineTokens(l1, separators[i], singleQuote);
           String[] t2 = determineTokens(l2, separators[i], singleQuote);
@@ -653,7 +656,7 @@ MAIN_LOOP:
             }
           }
           //FIXME should set warning message and let fall through
-          return new ParseSetup(ParserType.CSV, GUESS_SEP, singleQuotes, checkHeader, 1, null, ctypes, domains, naStrings, data, new ParseWriter.ParseErr[0],FileVec.DFLT_CHUNK_SIZE);
+          return new ParseSetup(CSV_INFO, GUESS_SEP, singleQuotes, checkHeader, 1, null, ctypes, domains, naStrings, data, new ParseWriter.ParseErr[0],FileVec.DFLT_CHUNK_SIZE);
         }
       }
       data[0] = determineTokens(lines[0], sep, singleQuotes);
@@ -712,10 +715,14 @@ MAIN_LOOP:
     }
 
     // Assemble the setup understood so far
-    ParseSetup resSetup = new ParseSetup(ParserType.CSV, sep, singleQuotes, checkHeader, ncols, labels, null, null /*domains*/, naStrings, data);
+    ParseSetup resSetup = new ParseSetup(CSV_INFO, sep, singleQuotes, checkHeader, ncols, labels, null, null /*domains*/, naStrings, data);
 
     // now guess the types
     if (columnTypes == null || ncols != columnTypes.length) {
+      int i = bits.length-1;
+      for(; i > 0; --i)
+        if(bits[i] == '\n') break;
+      if(i > 0) bits = Arrays.copyOf(bits,i); // stop at the last full line
       InputStream is = new ByteArrayInputStream(bits);
       CsvParser p = new CsvParser(resSetup, null);
       PreviewParseWriter dout = new PreviewParseWriter(resSetup._number_columns);
