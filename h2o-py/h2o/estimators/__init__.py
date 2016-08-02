@@ -5,21 +5,21 @@
 # Copyright 2016 H2O.ai;  Apache License Version 2.0 (see LICENSE for details)
 #
 from .deeplearning import H2OAutoEncoderEstimator
-from .kmeans import H2OKMeansEstimator
-from .svd import H2OSingularValueDecompositionEstimator
-from .aggregator import H2OAggregatorEstimator
 from .gbm import H2OGradientBoostingEstimator
-from .deeplearning import H2ODeepLearningEstimator
-from .fakegame import H2OFakegameEstimator
-from .glm import H2OGeneralizedLinearEstimator
-from .random_forest import H2ORandomForestEstimator
-from .glrm import H2OGeneralizedLowRankEstimator
 from .naive_bayes import H2ONaiveBayesEstimator
+from .aggregator import H2OAggregatorEstimator
+from .fakegame import H2OFakegameEstimator
 from .pca import H2OPrincipalComponentAnalysisEstimator
+from .random_forest import H2ORandomForestEstimator
+from .svd import H2OSingularValueDecompositionEstimator
+from .kmeans import H2OKMeansEstimator
+from .glrm import H2OGeneralizedLowRankEstimator
+from .glm import H2OGeneralizedLinearEstimator
+from .deeplearning import H2ODeepLearningEstimator
 
 __all__ = [
-    "H2OAutoEncoderEstimator", "H2OKMeansEstimator", "H2OSingularValueDecompositionEstimator", "H2OAggregatorEstimator",
-    "H2OGradientBoostingEstimator", "H2ODeepLearningEstimator", "H2OFakegameEstimator", "H2OGeneralizedLinearEstimator",
-    "H2ORandomForestEstimator", "H2OGeneralizedLowRankEstimator", "H2ONaiveBayesEstimator",
-    "H2OPrincipalComponentAnalysisEstimator"
+    "H2OAutoEncoderEstimator", "H2OGradientBoostingEstimator", "H2ONaiveBayesEstimator", "H2OAggregatorEstimator",
+    "H2OFakegameEstimator", "H2OPrincipalComponentAnalysisEstimator", "H2ORandomForestEstimator",
+    "H2OSingularValueDecompositionEstimator", "H2OKMeansEstimator", "H2OGeneralizedLowRankEstimator",
+    "H2OGeneralizedLinearEstimator", "H2ODeepLearningEstimator"
 ]
