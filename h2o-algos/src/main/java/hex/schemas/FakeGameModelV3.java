@@ -13,10 +13,6 @@ public class FakeGameModelV3 extends ModelSchemaV3<FakeGameModel, FakeGameModelV
   }
 
 
-  //==========================
-  // Custom adapters go here
-
-  // TOOD: I think we can implement the following two in ModelSchema, using reflection on the type parameters.
   public FakeGameV3.FakeGameParametersV3 createParametersSchema() { return new FakeGameV3.FakeGameParametersV3(); }
   public FakeGameModelOutputV3 createOutputSchema() { return new FakeGameModelOutputV3(); }
 }

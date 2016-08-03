@@ -4,11 +4,15 @@ import configuration.CfgTemplate;
 import configuration.ConfigurationFactory;
 import game.classifiers.Classifier;
 import game.classifiers.ClassifierFactory;
+import game.configuration.Configurable;
 import game.data.ArrayGameData;
+import game.models.Model;
+import game.models.ModelFactory;
 import hex.ModelBuilder;
 import hex.ModelCategory;
 import hex.fakegame.FakeGameModel.FakeGameOutput;
 import hex.fakegame.FakeGameModel.FakeGameParameters;
+import org.apache.commons.configuration.Configuration;
 import org.apache.commons.lang.NotImplementedException;
 import water.MRTask;
 import water.Scope;
@@ -58,9 +62,6 @@ public class FakeGame extends ModelBuilder<FakeGameModel, FakeGameParameters, Fa
     @Override
     public void init(boolean expensive) {
         super.init(expensive);
-        if (!isClassifier()) {
-            this.hide("_classifier_type", "Classifier type is not used when doing regression");
-        }
     }
 
     // ----------------------
@@ -86,10 +87,10 @@ public class FakeGame extends ModelBuilder<FakeGameModel, FakeGameParameters, Fa
                         break;
                     }
                 }
-                LinkedList<Classifier> cls = (new FakeGameLearner(resp_col, isClassifier(), _parms._classifier_config)).doAll(_parms.train())._lfg;
-                Log.debug("After do all cls contains "+ cls.size()+" elements");
+                LinkedList<Configurable> models = (new FakeGameLearner(resp_col, isClassifier(), _parms._model_config)).doAll(_parms.train())._lfg;
+                Log.debug("After doAll cls contains "+ models.size()+" elements");
                 // Fill in the model
-                model._output._cls = cls;
+                model._output._models = models;
                 model.update(_job);   // Update model in K/V store
                 _job.update(1);       // One unit of work
 
@@ -109,7 +110,7 @@ public class FakeGame extends ModelBuilder<FakeGameModel, FakeGameParameters, Fa
         boolean isClassifier;
         String classifier_config;
         // OUT
-        LinkedList<Classifier> _lfg;
+        LinkedList<Configurable> _lfg;
 
         FakeGameLearner(int resp_col, boolean isClassifier, String classifier_cfg) {
             this.resp_col = resp_col;
@@ -152,7 +153,10 @@ public class FakeGame extends ModelBuilder<FakeGameModel, FakeGameParameters, Fa
                 Classifier c = ClassifierFactory.createNewClassifier(cfg, data, true);
                 _lfg.add(c);
             } else {
-                throw new NotImplementedException("regression is not yet implemented");
+                StringReader sr = new StringReader(classifier_config);
+                CfgTemplate cfg = ConfigurationFactory.readConfiguration(sr);
+                Model m = ModelFactory.createNewConnectableModel(cfg, data, true);
+                _lfg.add(m);
             }
         }
 

@@ -1,10 +1,16 @@
 package hex.fakegame;
 
 import game.classifiers.Classifier;
+
+import game.configuration.Configurable;
 import hex.*;
+import org.apache.commons.collections.ArrayStack;
+import org.apache.commons.lang.NotImplementedException;
 import water.H2O;
 import water.Key;
+import water.util.ArrayUtils;
 
+import java.util.Arrays;
 import java.util.LinkedList;
 
 public class FakeGameModel extends Model<FakeGameModel, FakeGameModel.FakeGameParameters, FakeGameModel.FakeGameOutput> {
@@ -30,12 +36,12 @@ public class FakeGameModel extends Model<FakeGameModel, FakeGameModel.FakeGamePa
             return 1;
         }
 
-        public String _classifier_config;
+        public String _model_config;
     }
 
     public static class FakeGameOutput extends Model.Output {
 
-        public LinkedList<Classifier> _cls;
+        public LinkedList<Configurable> _models;
 
         public FakeGameOutput(FakeGame b) {
             super(b);
@@ -71,29 +77,49 @@ public class FakeGameModel extends Model<FakeGameModel, FakeGameModel.FakeGamePa
         }
     }
 
+    private double median(double[] ds){
+        Arrays.sort(ds);
+        if (ds.length % 2 == 1){
+            return ds[ds.length/2];
+        } else {
+            return (ds[ds.length/2]+ds[ds.length/2 - 1])/2.0;
+        }
+    }
+
+    private double mean(double[] ds){
+        double sum = 0.0;
+        for (double d : ds){
+            sum += d;
+        }
+        return sum/ds.length;
+    }
+
     @Override
     protected double[] score0(double data[/*ncols*/], double preds[/*nclasses+1*/]) {
         for (int i = 0; i < _output.nclasses() + 1; i++) {
             preds[i] = 0.0;
         }
 
-        for (Classifier c : _output._cls) {
-            preds[1 + c.getOutput(data)] += 1.0 / _output._cls.size();
-        }
-
-        double max = -1.0;
-        for (int i = 1; i < _output.nclasses() + 1; i++) {
-            if (preds[i] > max)
-                max = preds[i];
-        }
-
-        for (int i = 1; i < _output.nclasses() + 1; i++) {
-            if (preds[i] == max) {
-                preds[0] = i;
-                break;
+        if (_output.isClassifier()) {
+            for (Configurable m : _output._models) {
+                Classifier c = (Classifier) m;
+                preds[1 + c.getOutput(data)] += 1.0 / _output._models.size();
             }
+
+            //find maximum
+            preds[0] = ArrayUtils.maxIndex(preds);
+            return preds;
+        } else {
+            double ds[] = new double[_output._models.size()];
+            int idx = 0;
+            for (Configurable c : _output._models) {
+                game.models.Model m = (game.models.Model) c;
+                ds[idx] = m.getOutput(data);
+                idx ++;
+            }
+            // Mean, median? how to choose best regression
+            throw new NotImplementedException();
         }
-        return preds;
     }
 
 }

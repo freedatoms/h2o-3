@@ -18,8 +18,8 @@ public class FakeGameV3 extends ModelBuilderSchema<FakeGame, FakeGameV3, FakeGam
         "ignored_columns"
     };
 
-    @API(help = "Classifier config")
-  public String classifier_config;
+    @API(help = "Model configuration")
+  public String model_config;
 
   } // FakeGameParametersV2
 
