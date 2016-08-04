@@ -14,7 +14,7 @@ public class FakeGameV3 extends ModelBuilderSchema<FakeGame, FakeGameV3, FakeGam
     static public String[] fields = new String[]{
         "training_frame",
         "response_column",
-        "classifier_config",
+        "model_config",
         "ignored_columns"
     };
 

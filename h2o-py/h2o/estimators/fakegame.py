@@ -20,8 +20,8 @@ class H2OFakegameEstimator(H2OEstimator):
       response_column : VecSpecifier
         Response variable column.
 
-      classifier_config : str
-        Classifier config
+      model_config : str
+        Model configuration
 
       ignored_columns : list(str)
         Names of columns to ignore for training.
@@ -30,7 +30,7 @@ class H2OFakegameEstimator(H2OEstimator):
     def __init__(self, **kwargs):
         super(H2OFakegameEstimator, self).__init__()
         self._parms = {}
-        for name in ["training_frame", "response_column", "classifier_config", "ignored_columns"]:
+        for name in ["training_frame", "response_column", "model_config", "ignored_columns"]:
             pname = name[:-1] if name[-1] == '_' else name
             self._parms[pname] = kwargs[name] if name in kwargs else None
 
@@ -51,12 +51,12 @@ class H2OFakegameEstimator(H2OEstimator):
         self._parms["response_column"] = value
 
     @property
-    def classifier_config(self):
-        return self._parms["classifier_config"]
+    def model_config(self):
+        return self._parms["model_config"]
 
-    @classifier_config.setter
-    def classifier_config(self, value):
-        self._parms["classifier_config"] = value
+    @model_config.setter
+    def model_config(self, value):
+        self._parms["model_config"] = value
 
     @property
     def ignored_columns(self):

@@ -117,8 +117,9 @@ public class FakeGameModel extends Model<FakeGameModel, FakeGameModel.FakeGamePa
                 ds[idx] = m.getOutput(data);
                 idx ++;
             }
-            // Mean, median? how to choose best regression
-            throw new NotImplementedException();
+            //FIXME: Mean, median? how to choose best regression
+            preds[0] = mean(ds);
+            return preds;
         }
     }
 
