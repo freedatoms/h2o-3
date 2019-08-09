@@ -156,7 +156,7 @@ def gen_module(schema, algo, module):
         yield "  pre_trained <- .validate.H2OFrame(pre_trained)"
     elif algo not in ["generic"]:
         yield "  training_frame <- .validate.H2OFrame(training_frame, required=TRUE)"
-    if algo not in ["word2vec", "aggregator", "coxph", "isolationforest", "generic"]:
+    if algo not in ["word2vec", "aggregator", "coxph", "isolationforest", "generic", "targetencoder"]:
         yield "  validation_frame <- .validate.H2OFrame(validation_frame)"
     if algo in ["stackedensemble"]:
         yield "  blending_frame <- .validate.H2OFrame(blending_frame)"
@@ -284,6 +284,11 @@ def gen_module(schema, algo, module):
         yield " "
         yield "  if (!missing(metalearner_params))"
         yield "      parms$metalearner_params <- as.character(toJSON(metalearner_params, pretty = TRUE))"
+    if algo == "targetencoder":
+        yield " if(missing(encoded_columns) && !missing(x)){"
+        yield "     parms$encoded_columns <- x"
+        yield " }"
+        yield " parms$response_column <- target_column"
     for param in schema["parameters"]:
         if param["name"] in ["ignored_columns", "response_column", "training_frame", "max_confusion_matrix_size"]:
             continue
