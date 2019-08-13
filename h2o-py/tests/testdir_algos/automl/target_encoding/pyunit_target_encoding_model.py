@@ -21,7 +21,7 @@ def test_target_encoding_fit_method():
     trainingFrame[foldColumnName] = trainingFrame.kfold_column(n_folds=5, seed=1234)
     
     te = H2OTargetencoderEstimator(encoded_columns = teColumns, target_column = targetColumnName)
-    te.train(x = teColumns, y = targetColumnName, training_frame = trainingFrame)
+    te.train(training_frame = trainingFrame)
     transformed = te.predict(trainingFrame)
     
     assert transformed is not None

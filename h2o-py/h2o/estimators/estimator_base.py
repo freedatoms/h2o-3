@@ -119,6 +119,13 @@ class H2OEstimator(ModelBase):
         training_frame = H2OFrame._validate(training_frame, 'training_frame',
                                             required=self._requires_training_frame() and not has_default_training_frame)
         validation_frame = H2OFrame._validate(validation_frame, 'validation_frame')
+        algo = self.algo
+        parms = self._parms.copy()
+        if(algo == "targetencoder"):
+            x = parms["encoded_columns"]
+            y = parms["target_column"]
+            
+        
         assert_is_type(y, None, int, str)
         assert_is_type(x, None, int, str, [str, int], {str, int})
         assert_is_type(ignored_columns, None, [str, int], {str, int})
@@ -135,10 +142,9 @@ class H2OEstimator(ModelBase):
             self._verify_training_frame_params(offset_column, fold_column, weights_column, validation_frame)
             training_frame = self.training_frame if has_default_training_frame else None
 
-        algo = self.algo
         if verbose and algo not in ["drf", "gbm", "deeplearning", "xgboost"]:
             raise H2OValueError("Verbose should only be set to True for drf, gbm, deeplearning, and xgboost models")
-        parms = self._parms.copy()
+
         if "__class__" in parms:  # FIXME: hackt for PY3
             del parms["__class__"]
         is_auto_encoder = bool(parms.get("autoencoder"))
