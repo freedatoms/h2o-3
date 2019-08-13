@@ -22,6 +22,8 @@ import static junit.framework.TestCase.assertTrue;
 import static org.junit.Assert.*;
 
 public class AutoMLTest extends water.TestUtil {
+  
+  private static String PROSTATE = "./smalldata/prostate/prostate_complete.csv.zip";
 
   @BeforeClass public static void setup() { stall_till_cloudsize(1); }
 
@@ -30,7 +32,7 @@ public class AutoMLTest extends water.TestUtil {
     Frame fr=null;
     try {
       AutoMLBuildSpec autoMLBuildSpec = new AutoMLBuildSpec();
-      fr = parse_test_file("./smalldata/logreg/prostate_train.csv");
+      fr = parse_test_file(PROSTATE);
       autoMLBuildSpec.input_spec.training_frame = fr._key;
       autoMLBuildSpec.input_spec.response_column = "CAPSULE";
 
@@ -63,7 +65,7 @@ public class AutoMLTest extends water.TestUtil {
     Frame fr=null;
     try {
       AutoMLBuildSpec autoMLBuildSpec = new AutoMLBuildSpec();
-      fr = parse_test_file("./smalldata/logreg/prostate_train.csv");
+      fr = parse_test_file(PROSTATE);
       autoMLBuildSpec.input_spec.training_frame = fr._key;
       autoMLBuildSpec.input_spec.response_column = "CAPSULE";
 
@@ -91,7 +93,7 @@ public class AutoMLTest extends water.TestUtil {
     List<Lockable> deletables = new ArrayList<>();
     try {
       final int seed = 62832;
-      final Frame fr = parse_test_file("./smalldata/logreg/prostate_train.csv"); deletables.add(fr);
+      final Frame fr = parse_test_file(PROSTATE); deletables.add(fr);
       final Frame test = parse_test_file("./smalldata/logreg/prostate_test.csv"); deletables.add(test);
       
       String target = "CAPSULE";
@@ -145,7 +147,7 @@ public class AutoMLTest extends water.TestUtil {
     Frame fr=null;
     try {
       AutoMLBuildSpec autoMLBuildSpec = new AutoMLBuildSpec();
-      fr = parse_test_file("./smalldata/logreg/prostate_train.csv");
+      fr = parse_test_file(PROSTATE);
       autoMLBuildSpec.input_spec.training_frame = fr._key;
       autoMLBuildSpec.input_spec.response_column = "CAPSULE";
 
@@ -169,7 +171,7 @@ public class AutoMLTest extends water.TestUtil {
     Frame fr=null;
     try {
       AutoMLBuildSpec autoMLBuildSpec = new AutoMLBuildSpec();
-      fr = parse_test_file("./smalldata/logreg/prostate_train.csv");
+      fr = parse_test_file(PROSTATE);
       autoMLBuildSpec.input_spec.training_frame = fr._key;
       autoMLBuildSpec.input_spec.response_column = "CAPSULE";
       autoMLBuildSpec.build_models.exclude_algos = new Algo[] {Algo.DeepLearning, Algo.DRF, Algo.GLM};
@@ -191,7 +193,6 @@ public class AutoMLTest extends water.TestUtil {
   }
 
 
-  @Ignore
   @Test public void test_individual_model_max_runtime() {
     AutoML aml=null;
     Frame fr=null;
@@ -234,7 +235,7 @@ public class AutoMLTest extends water.TestUtil {
     Model leader = null;
     try {
       AutoMLBuildSpec autoMLBuildSpec = new AutoMLBuildSpec();
-      fr = parse_test_file("./smalldata/logreg/prostate_train.csv");
+      fr = parse_test_file(PROSTATE);
       autoMLBuildSpec.input_spec.training_frame = fr._key;
       autoMLBuildSpec.input_spec.response_column = "CAPSULE";
       autoMLBuildSpec.build_control.stopping_criteria.set_max_models(1);
@@ -328,7 +329,7 @@ public class AutoMLTest extends water.TestUtil {
     Frame fr = null, test = null;
     try {
       AutoMLBuildSpec autoMLBuildSpec = new AutoMLBuildSpec();
-      fr = parse_test_file("./smalldata/logreg/prostate_train.csv");
+      fr = parse_test_file(PROSTATE);
       test = parse_test_file("./smalldata/logreg/prostate_test.csv");
       autoMLBuildSpec.input_spec.response_column = "CAPSULE";
       autoMLBuildSpec.input_spec.training_frame = fr._key;
@@ -355,7 +356,7 @@ public class AutoMLTest extends water.TestUtil {
     Frame fr = null, test = null;
     try {
       AutoMLBuildSpec autoMLBuildSpec = new AutoMLBuildSpec();
-      fr = parse_test_file("./smalldata/logreg/prostate_train.csv");
+      fr = parse_test_file(PROSTATE);
       test = parse_test_file("./smalldata/logreg/prostate_test.csv");
       autoMLBuildSpec.input_spec.response_column = "CAPSULE";
       autoMLBuildSpec.input_spec.training_frame = fr._key;
@@ -382,7 +383,7 @@ public class AutoMLTest extends water.TestUtil {
     Frame fr = null;
     try {
       AutoMLBuildSpec autoMLBuildSpec = new AutoMLBuildSpec();
-      fr = parse_test_file("./smalldata/logreg/prostate_train.csv");
+      fr = parse_test_file(PROSTATE);
       autoMLBuildSpec.input_spec.response_column = "CAPSULE";
       autoMLBuildSpec.input_spec.training_frame = fr._key;
       autoMLBuildSpec.input_spec.validation_frame = null;
@@ -407,7 +408,7 @@ public class AutoMLTest extends water.TestUtil {
     Frame fr = null;
     try {
       AutoMLBuildSpec autoMLBuildSpec = new AutoMLBuildSpec();
-      fr = parse_test_file("./smalldata/logreg/prostate_train.csv");
+      fr = parse_test_file(PROSTATE);
       autoMLBuildSpec.input_spec.response_column = "CAPSULE";
       autoMLBuildSpec.input_spec.training_frame = fr._key;
       autoMLBuildSpec.input_spec.validation_frame = null;
