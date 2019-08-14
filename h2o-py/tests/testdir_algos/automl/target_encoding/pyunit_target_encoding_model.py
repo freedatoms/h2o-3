@@ -20,7 +20,7 @@ def test_target_encoding_fit_method():
     trainingFrame[targetColumnName] = trainingFrame[targetColumnName].asfactor()
     trainingFrame[foldColumnName] = trainingFrame.kfold_column(n_folds=5, seed=1234)
     
-    te = H2OTargetencoderEstimator(encoded_columns = teColumns, target_column = targetColumnName)
+    te = H2OTargetencoderEstimator(encoded_columns = teColumns, target_column = targetColumnName, k = 10, f = 30)
     te.train(training_frame = trainingFrame)
     transformed = te.predict(trainingFrame)
     
