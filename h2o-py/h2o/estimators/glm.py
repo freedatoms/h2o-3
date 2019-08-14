@@ -44,7 +44,7 @@ class H2OGeneralizedLinearEstimator(H2OEstimator):
                       "beta_constraints", "max_active_predictors", "interactions", "interaction_pairs", "obj_reg",
                       "export_checkpoints_dir", "balance_classes", "class_sampling_factors", "max_after_balance_size",
                       "max_confusion_matrix_size", "max_hit_ratio_k", "max_runtime_secs", "custom_metric_func"}
-        if "Lambda" in kwargs: kwargs["lambda_"] = kwargs.pop("Lambda")'
+        if "Lambda" in kwargs: kwargs["lambda_"] = kwargs.pop("Lambda")
         for pname, pvalue in kwargs.items():
             if pname == 'model_id':
                 self._id = pvalue
