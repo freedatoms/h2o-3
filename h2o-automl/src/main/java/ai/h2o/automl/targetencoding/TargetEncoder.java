@@ -35,6 +35,7 @@ public class TargetEncoder {
 
     // workaround for PUBDEV-6319: this makes sure TE does get consistent and correct aggregates
     private static final AstGroup GROUP_BY = new AstGroup(false);
+    public static final String ENCODED_COLUMN_POSTFIX = "_te";
 
     public static String NUMERATOR_COL_NAME = "numerator";
     public static String DENOMINATOR_COL_NAME = "denominator";
@@ -603,7 +604,7 @@ public class TargetEncoder {
 
             imputeNAsForColumn(dataWithAllEncodings, teColumnName, teColumnName + "_NA");
 
-            String newEncodedColumnName = teColumnName + "_te";
+            String newEncodedColumnName = teColumnName + ENCODED_COLUMN_POSTFIX;
 
             Frame encodingMapForCurrentTEColumn = columnToEncodingMap.get(teColumnName);
             double priorMeanFromTrainingDataset = calculatePriorMean(encodingMapForCurrentTEColumn);
