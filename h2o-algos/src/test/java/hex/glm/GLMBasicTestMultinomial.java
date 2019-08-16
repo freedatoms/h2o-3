@@ -797,6 +797,15 @@ public class GLMBasicTestMultinomial extends TestUtil {
     double threshold = 1e-6;
     try {
       Frame fr = parse_test_file(filename);
+      if (fr.vec("C1").isInt()) { // massage frame for enum columns
+        Vec v = fr.remove("C1");
+        fr.add("C1", v.toCategoricalVec());
+        if (fr.vec("C2").isInt()) {
+          Vec v1 = fr.remove("C2");
+          fr.add("C2", v1.toCategoricalVec());
+        }
+      }
+      fr.add("C3", fr.remove("C3"));
       Vec v = fr.remove("C4");
       fr.add("C4", v.toCategoricalVec());
       v.remove();
