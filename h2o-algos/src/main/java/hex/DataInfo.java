@@ -277,7 +277,7 @@ public class DataInfo extends Keyed<DataInfo> {
       else
         _catOffsets[i+1] = (len += v.domain().length - (useAllFactorLevels?0:1) + (missingBucket? 1 : 0)); //missing values turn into a new factor level
       _catNAFill[i] = imputeMissing ? 
-              imputer.imputeCat(train.vec(cats[i]), _useAllFactorLevels)
+              imputer.imputeCat(names[i], train.vec(cats[i]), _useAllFactorLevels)
               :
               _catMissing[i] ? v.domain().length - (_useAllFactorLevels || isInteractionVec(i)?0:1) : -100;
       _permutation[i] = cats[i];
@@ -300,20 +300,21 @@ public class DataInfo extends Keyed<DataInfo> {
     _numNAFill = new double[numNums()];
     int numIdx=0;
     for(int i=0;i<nnums;++i) {
+      String name = train.name(nums[i]);
       Vec v = train.vec(nums[i]);
       if( v instanceof InteractionWrappedVec ) {
         InteractionWrappedVec iwv = (InteractionWrappedVec)v;
         int start = iwv._useAllFactorLevels?0:1;
-        int length   = iwv.expandedLength();
+        int length = iwv.expandedLength();
         double[] means = iwv.getMeans();
         System.arraycopy(means,start,_numMeans,numIdx,length);
-        double[] naFill = imputer.imputeInteraction(iwv, means);
+        double[] naFill = imputer.imputeInteraction(name, iwv, means);
         System.arraycopy(naFill,start,_numNAFill,numIdx,length);
         numIdx+=length;
       }
       else {
         _numMeans[numIdx] = v.mean();
-        _numNAFill[numIdx] = imputer.imputeNum(v);
+        _numNAFill[numIdx] = imputer.imputeNum(name, v);
         numIdx++;
       }
     }
@@ -1333,22 +1334,22 @@ public class DataInfo extends Keyed<DataInfo> {
   }
 
   public interface Imputer {
-    int imputeCat(Vec v, boolean useAllFactorLevels);
-    double imputeNum(Vec v);
-    double[] imputeInteraction(InteractionWrappedVec iv, double[] means);
+    int imputeCat(String name, Vec v, boolean useAllFactorLevels);
+    double imputeNum(String name, Vec v);
+    double[] imputeInteraction(String name, InteractionWrappedVec iv, double[] means);
   }
 
   public static class MeanImputer implements Imputer {
     @Override
-    public int imputeCat(Vec v, boolean useAllFactorLevels) {
+    public int imputeCat(String name, Vec v, boolean useAllFactorLevels) {
       return DataInfo.imputeCat(v, useAllFactorLevels);
     }
     @Override
-    public double imputeNum(Vec v) {
+    public double imputeNum(String name, Vec v) {
       return v.mean();
     }
     @Override
-    public double[] imputeInteraction(InteractionWrappedVec iv, double[] means) {
+    public double[] imputeInteraction(String name, InteractionWrappedVec iv, double[] means) {
       return means;
     }
   }
