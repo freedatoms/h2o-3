@@ -91,7 +91,7 @@ class H2OEstimator(ModelBase):
 
     def train(self, x=None, y=None, training_frame=None, offset_column=None, fold_column=None,
               weights_column=None, validation_frame=None, max_runtime_secs=None, ignored_columns=None,
-              model_id=None, verbose=False):
+              model_id=None, verbose=False, **kwargs):
         """
         Train the H2O model.
 
@@ -108,13 +108,13 @@ class H2OEstimator(ModelBase):
         :param bool verbose: Print scoring history to stdout. Defaults to False.
         """
         self._train(x=x, y=y, training_frame=training_frame, offset_column=offset_column, fold_column=fold_column,
-                    weights_column=weights_column, validation_frame=validation_frame, max_runtime_secs=max_runtime_secs, 
-                    ignored_columns=ignored_columns, model_id=model_id, verbose=verbose)
+                    weights_column=weights_column, validation_frame=validation_frame, max_runtime_secs=max_runtime_secs,
+                    ignored_columns=ignored_columns, model_id=model_id, verbose=verbose, **kwargs)
 
 
     def _train(self, x=None, y=None, training_frame=None, offset_column=None, fold_column=None,
-              weights_column=None, validation_frame=None, max_runtime_secs=None, ignored_columns=None,
-              model_id=None, verbose=False, extend_parms_fn=None):
+               weights_column=None, validation_frame=None, max_runtime_secs=None, ignored_columns=None,
+               model_id=None, verbose=False, extend_parms_fn=None, **kwargs):
         has_default_training_frame = hasattr(self, 'training_frame') and self.training_frame is not None
         training_frame = H2OFrame._validate(training_frame, 'training_frame',
                                             required=self._requires_training_frame() and not has_default_training_frame)
@@ -122,10 +122,16 @@ class H2OEstimator(ModelBase):
         algo = self.algo
         parms = self._parms.copy()
         if(algo == "targetencoder"):
-            x = parms["encoded_columns"]
-            y = parms["target_column"]
+            if ("data_leakage_handling" in kwargs):
+                parms["data_leakage_handling"] = kwargs["data_leakage_handling"]
+            if ("target_column" in kwargs):
+                parms["target_column"] = kwargs["target_column"]
+            if ("encoded_columns" in kwargs):
+                parms["encoded_columns"] = kwargs["encoded_columns"]
             
-        
+            y = parms["target_column"] if "target_column" in parms else y
+            parms["encoded_columns"] = parms["encoded_columns"] if "encoded_columns" in parms else x
+
         assert_is_type(y, None, int, str)
         assert_is_type(x, None, int, str, [str, int], {str, int})
         assert_is_type(ignored_columns, None, [str, int], {str, int})
