@@ -38,7 +38,6 @@ class ModelBase(backwards_compatible(Keyed)):
         self._end_time = None
         self._run_time = None
 
-
     @property
     def key(self):
         return self._id
@@ -54,7 +53,6 @@ class ModelBase(backwards_compatible(Keyed)):
         self._id = newid
         h2o.rapids("(rename '%s' '%s')" % (oldid, newid))
 
-
     @property
     def params(self):
         """
@@ -68,7 +66,6 @@ class ModelBase(backwards_compatible(Keyed)):
                          "actual": self.parms[p]["actual_value"]}
         return params
 
-
     @property
     def default_params(self):
         """Dictionary of the default parameters of the model."""
@@ -76,7 +73,6 @@ class ModelBase(backwards_compatible(Keyed)):
         for p in self.parms:
             params[p] = self.parms[p]["default_value"]
         return params
-
 
     @property
     def actual_params(self):
@@ -93,12 +89,39 @@ class ModelBase(backwards_compatible(Keyed)):
                 params[p] = self.parms[p]["actual_value"]
         return params
 
-
     @property
     def full_parameters(self):
         """Dictionary of the full specification of all parameters."""
         return self.parms
 
+    @property
+    def user_specified_parameters(self):
+        """
+        Get user specified parameters.
+        
+        
+        :returns: A dictionary of parameters used to build this model.
+        """
+        parms = self._parms.copy()
+        del parms['model_id']
+        return parms
+
+    @property
+    def non_default_parameters(self):
+        """
+        Get parameters that contain non default value, i.e., user specified value that is 
+        different from the default value and parameters that were inferred during the training. 
+        
+        :returns: A dictionary of parameters used to build this model.
+        """
+        ignored_params = {'model_id', 'training_frame', 'response_column'}
+        return {
+            k: v['actual']
+            for k, v in self.params.items()
+            if v['default'] != v['actual']
+               and k not in ignored_params
+               and v['default'] == v['default']  # just in case a default parameter contains NaN
+        }
 
     @property
     def type(self):
@@ -130,14 +153,12 @@ class ModelBase(backwards_compatible(Keyed)):
         """Model training time in milliseconds"""
         return self._run_time
 
-
     def __repr__(self):
         # PUBDEV-2278: using <method>? from IPython caused everything to dump
         stk = traceback.extract_stack()
         if not ("IPython" in stk[-2][0] and "info" == stk[-2][2]):
             self.show()
         return ""
-
 
     def predict_leaf_node_assignment(self, test_data, type="Path"):
         """
@@ -209,7 +230,7 @@ class ModelBase(backwards_compatible(Keyed)):
                     data={"feature_frequencies": True})
         return h2o.get_frame(j["predictions_frame"]["name"])
 
-    def predict(self, test_data, custom_metric = None, custom_metric_func = None):
+    def predict(self, test_data, custom_metric=None, custom_metric_func=None):
         """
         Predict on a dataset.
 
@@ -226,21 +247,19 @@ class ModelBase(backwards_compatible(Keyed)):
                              "The argument 'eval_func_ref' cannot be specified when eval_func is specified, ")
             eval_func_ref = h2o.upload_custom_metric(custom_metric)
         if not isinstance(test_data, h2o.H2OFrame): raise ValueError("test_data must be an instance of H2OFrame")
-        j = H2OJob(h2o.api("POST /4/Predictions/models/%s/frames/%s" % (self.model_id, test_data.frame_id), data = {'custom_metric_func': custom_metric_func}),
+        j = H2OJob(h2o.api("POST /4/Predictions/models/%s/frames/%s" % (self.model_id, test_data.frame_id),
+                           data={'custom_metric_func': custom_metric_func}),
                    self._model_json["algo"] + " prediction")
         j.poll()
         return h2o.get_frame(j.dest_key)
-
 
     def is_cross_validated(self):
         """Return True if the model was cross-validated."""
         return self._is_xvalidated
 
-
     def xval_keys(self):
         """Return model keys for the cross-validated model."""
         return self._xval_keys
-
 
     def get_xval_models(self, key=None):
         """
@@ -252,7 +271,6 @@ class ModelBase(backwards_compatible(Keyed)):
         """
         return h2o.get_model(key) if key is not None else [h2o.get_model(k) for k in self._xval_keys]
 
-
     @property
     def xvals(self):
         """
@@ -262,10 +280,8 @@ class ModelBase(backwards_compatible(Keyed)):
         """
         return self.get_xval_models()
 
-
     def detach(self):
         self._id = None
-
 
     def deepfeatures(self, test_data, layer):
         """
@@ -284,7 +300,6 @@ class ModelBase(backwards_compatible(Keyed)):
         j.poll()
         return h2o.get_frame(j.dest_key)
 
-
     def weights(self, matrix_id=0):
         """
         Return the frame for the respective weight matrix.
@@ -299,7 +314,6 @@ class ModelBase(backwards_compatible(Keyed)):
                 "Weight matrix does not exist. Model has {0} weight matrices (0-based indexing), but matrix {1} "
                 "was requested.".format(num_weight_matrices, matrix_id))
         return h2o.get_frame(self._model_json["output"]["weights"][matrix_id]["URL"].split("/")[3])
-
 
     def biases(self, vector_id=0):
         """
@@ -316,31 +330,25 @@ class ModelBase(backwards_compatible(Keyed)):
                 "was requested.".format(num_bias_vectors, vector_id))
         return h2o.get_frame(self._model_json["output"]["biases"][vector_id]["URL"].split("/")[3])
 
-
     def normmul(self):
         """Normalization/Standardization multipliers for numeric predictors."""
         return self._model_json["output"]["normmul"]
-
 
     def normsub(self):
         """Normalization/Standardization offsets for numeric predictors."""
         return self._model_json["output"]["normsub"]
 
-
     def respmul(self):
         """Normalization/Standardization multipliers for numeric response."""
         return self._model_json["output"]["normrespmul"]
-
 
     def respsub(self):
         """Normalization/Standardization offsets for numeric response."""
         return self._model_json["output"]["normrespsub"]
 
-
     def catoffsets(self):
         """Categorical offsets for one-hot encoding."""
         return self._model_json["output"]["catoffsets"]
-
 
     def model_performance(self, test_data=None, train=False, valid=False, xval=False):
         """
@@ -364,8 +372,10 @@ class ModelBase(backwards_compatible(Keyed)):
         else:  # cases dealing with test_data not None
             if not isinstance(test_data, h2o.H2OFrame):
                 raise ValueError("`test_data` must be of type H2OFrame.  Got: " + type(test_data))
-            if (self._model_json["response_column_name"] != None) and not(self._model_json["response_column_name"] in test_data.names):
-                print("WARNING: Model metrics cannot be calculated and metric_json is empty due to the absence of the response column in your dataset.")
+            if (self._model_json["response_column_name"] != None) and not (
+                self._model_json["response_column_name"] in test_data.names):
+                print(
+                    "WARNING: Model metrics cannot be calculated and metric_json is empty due to the absence of the response column in your dataset.")
                 return
             res = h2o.api("POST /3/ModelMetrics/models/%s/frames/%s" % (self.model_id, test_data.frame_id))
 
@@ -376,7 +386,6 @@ class ModelBase(backwards_compatible(Keyed)):
                     raw_metrics = mm
                     break
             return self._metrics_class(raw_metrics, algo=self._model_json["algo"])
-
 
     def scoring_history(self):
         """
@@ -389,7 +398,6 @@ class ModelBase(backwards_compatible(Keyed)):
             return model["scoring_history"].as_data_frame()
         print("No score history for this model")
 
-
     def cross_validation_metrics_summary(self):
         """
         Retrieve Cross-Validation Metrics Summary.
@@ -401,14 +409,12 @@ class ModelBase(backwards_compatible(Keyed)):
             return model["cross_validation_metrics_summary"]
         print("No cross-validation metrics summary for this model")
 
-
     def summary(self):
         """Print a detailed summary of the model."""
         model = self._model_json["output"]
         if "model_summary" in model and model["model_summary"] is not None:
             return model["model_summary"]
         print("No model summary for this model")
-
 
     def show(self):
         """Print innards of model, without regards to type."""
@@ -448,7 +454,6 @@ class ModelBase(backwards_compatible(Keyed)):
         if "variable_importances" in model and model["variable_importances"]:
             model["variable_importances"].show()
 
-
     def varimp(self, use_pandas=False):
         """
         Pretty print the variable importances, or return them in a list.
@@ -458,24 +463,24 @@ class ModelBase(backwards_compatible(Keyed)):
         :returns: A list or Pandas DataFrame.
         """
         model = self._model_json["output"]
-        if self.algo=='glm' or "variable_importances" in list(model.keys()) and model["variable_importances"]:
-            if self.algo=='glm':
+        if self.algo == 'glm' or "variable_importances" in list(model.keys()) and model["variable_importances"]:
+            if self.algo == 'glm':
                 tempvals = model["standardized_coefficient_magnitudes"].cell_values
                 maxVal = 0
-                sum=0
+                sum = 0
                 for item in tempvals:
-                    sum=sum+item[1]
-                    if item[1]>maxVal:
+                    sum = sum + item[1]
+                    if item[1] > maxVal:
                         maxVal = item[1]
                 vals = []
                 for item in tempvals:
-                    tempT = (item[0], item[1], item[1]/maxVal, item[1]/sum)
+                    tempT = (item[0], item[1], item[1] / maxVal, item[1] / sum)
                     vals.append(tempT)
                 header = ["variable", "relative_importance", "scaled_importance", "percentage"]
             else:
                 vals = model["variable_importances"].cell_values
                 header = model["variable_importances"].col_header
-                
+
             if use_pandas and can_use_pandas():
                 import pandas
                 return pandas.DataFrame(vals, columns=header)
@@ -483,7 +488,6 @@ class ModelBase(backwards_compatible(Keyed)):
                 return vals
         else:
             print("Warning: This model doesn't have variable importances")
-
 
     def residual_deviance(self, train=False, valid=False, xval=None):
         """
@@ -504,7 +508,6 @@ class ModelBase(backwards_compatible(Keyed)):
         else:
             return self._model_json["output"]["validation_metrics"].residual_deviance()
 
-
     def residual_degrees_of_freedom(self, train=False, valid=False, xval=False):
         """
         Retreive the residual degress of freedom if this model has the attribute, or None otherwise.
@@ -523,7 +526,6 @@ class ModelBase(backwards_compatible(Keyed)):
             return self._model_json["output"]["training_metrics"].residual_degrees_of_freedom()
         else:
             return self._model_json["output"]["validation_metrics"].residual_degrees_of_freedom()
-
 
     def null_deviance(self, train=False, valid=False, xval=False):
         """
@@ -544,7 +546,6 @@ class ModelBase(backwards_compatible(Keyed)):
         else:
             return self._model_json["output"]["validation_metrics"].null_deviance()
 
-
     def null_degrees_of_freedom(self, train=False, valid=False, xval=False):
         """
         Retreive the null degress of freedom if this model has the attribute, or None otherwise.
@@ -564,11 +565,9 @@ class ModelBase(backwards_compatible(Keyed)):
         else:
             return self._model_json["output"]["validation_metrics"].null_degrees_of_freedom()
 
-
     def pprint_coef(self):
         """Pretty print the coefficents table (includes normalized coefficients)."""
         print(self._model_json["output"]["coefficients_table"])  # will return None if no coefs!
-
 
     def coef(self):
         """
@@ -581,14 +580,13 @@ class ModelBase(backwards_compatible(Keyed)):
             return None
         return {name: coef for name, coef in zip(tbl["names"], tbl["coefficients"])}
 
-
     def coef_norm(self):
         """
         Return coefficients fitted on the standardized data (requires standardize = True, which is on by default).
 
         These coefficients can be used to evaluate variable importance.
         """
-        if self._model_json["output"]["model_category"]=="Multinomial":
+        if self._model_json["output"]["model_category"] == "Multinomial":
             tbl = self._model_json["output"]["standardized_coefficient_magnitudes"]
             if tbl is None:
                 return None
@@ -598,7 +596,6 @@ class ModelBase(backwards_compatible(Keyed)):
             if tbl is None:
                 return None
             return {name: coef for name, coef in zip(tbl["names"], tbl["standardized_coefficients"])}
-
 
     def r2(self, train=False, valid=False, xval=False):
         """
@@ -624,7 +621,6 @@ class ModelBase(backwards_compatible(Keyed)):
             m[k] = None if v is None else v.r2()
         return list(m.values())[0] if len(m) == 1 else m
 
-
     def mse(self, train=False, valid=False, xval=False):
         """
         Get the Mean Square Error.
@@ -644,7 +640,6 @@ class ModelBase(backwards_compatible(Keyed)):
         for k, v in viewitems(tm):
             m[k] = None if v is None else v.mse()
         return list(m.values())[0] if len(m) == 1 else m
-
 
     def rmse(self, train=False, valid=False, xval=False):
         """
@@ -666,7 +661,6 @@ class ModelBase(backwards_compatible(Keyed)):
             m[k] = None if v is None else v.rmse()
         return list(m.values())[0] if len(m) == 1 else m
 
-
     def mae(self, train=False, valid=False, xval=False):
         """
         Get the Mean Absolute Error.
@@ -687,7 +681,6 @@ class ModelBase(backwards_compatible(Keyed)):
             m[k] = None if v is None else v.mae()
         return list(m.values())[0] if len(m) == 1 else m
 
-
     def rmsle(self, train=False, valid=False, xval=False):
         """
         Get the Root Mean Squared Logarithmic Error.
@@ -706,7 +699,6 @@ class ModelBase(backwards_compatible(Keyed)):
         m = {}
         for k, v in viewitems(tm): m[k] = None if v is None else v.rmsle()
         return list(m.values())[0] if len(m) == 1 else m
-
 
     def logloss(self, train=False, valid=False, xval=False):
         """
@@ -727,7 +719,6 @@ class ModelBase(backwards_compatible(Keyed)):
         for k, v in viewitems(tm): m[k] = None if v is None else v.logloss()
         return list(m.values())[0] if len(m) == 1 else m
 
-
     def mean_residual_deviance(self, train=False, valid=False, xval=False):
         """
         Get the Mean Residual Deviances.
@@ -747,7 +738,6 @@ class ModelBase(backwards_compatible(Keyed)):
         for k, v in viewitems(tm): m[k] = None if v is None else v.mean_residual_deviance()
         return list(m.values())[0] if len(m) == 1 else m
 
-
     def auc(self, train=False, valid=False, xval=False):
         """
         Get the AUC (Area Under Curve).
@@ -765,11 +755,10 @@ class ModelBase(backwards_compatible(Keyed)):
         tm = ModelBase._get_metrics(self, train, valid, xval)
         m = {}
         for k, v in viewitems(tm):
-            if not(v == None) and not(is_type(v, h2o.model.metrics_base.H2OBinomialModelMetrics)):
+            if not (v == None) and not (is_type(v, h2o.model.metrics_base.H2OBinomialModelMetrics)):
                 raise H2OValueError("auc() is only available for Binomial classifiers.")
             m[k] = None if v is None else v.auc()
         return list(m.values())[0] if len(m) == 1 else m
-
 
     def aic(self, train=False, valid=False, xval=False):
         """
@@ -789,7 +778,6 @@ class ModelBase(backwards_compatible(Keyed)):
         m = {}
         for k, v in viewitems(tm): m[k] = None if v is None else v.aic()
         return list(m.values())[0] if len(m) == 1 else m
-
 
     def gini(self, train=False, valid=False, xval=False):
         """
@@ -826,12 +814,12 @@ class ModelBase(backwards_compatible(Keyed)):
         """
         tm = ModelBase._get_metrics(self, train, valid, xval)
         m = {}
-        for k, v in viewitems(tm): 
-            if not(v == None) and not(is_type(v, h2o.model.metrics_base.H2OBinomialModelMetrics)):
+        for k, v in viewitems(tm):
+            if not (v == None) and not (is_type(v, h2o.model.metrics_base.H2OBinomialModelMetrics)):
                 raise H2OValueError("pr_auc() is only available for Binomial classifiers.")
             m[k] = None if v is None else v.pr_auc()
         return list(m.values())[0] if len(m) == 1 else m
-    
+
     def download_pojo(self, path="", get_genmodel_jar=False, genmodel_name=""):
         """
         Download the POJO for this model to the directory specified by path.
@@ -847,7 +835,6 @@ class ModelBase(backwards_compatible(Keyed)):
         assert_is_type(get_genmodel_jar, bool)
         path = path.rstrip("/")
         return h2o.download_pojo(self, path, get_jar=get_genmodel_jar, jar_name=genmodel_name)
-
 
     def download_mojo(self, path=".", get_genmodel_jar=False, genmodel_name=""):
         """
@@ -914,7 +901,6 @@ class ModelBase(backwards_compatible(Keyed)):
         if len(metrics) == 0: metrics["train"] = output["training_metrics"]
         return metrics
 
-
     # Delete from cluster as model goes out of scope
     # def __del__(self):
     #   h2o.remove(self._id)
@@ -948,7 +934,7 @@ class ModelBase(backwards_compatible(Keyed)):
                 # Delete first row of DL scoring history since it contains NAs & NaNs
                 if scoring_history["samples"][0] == 0:
                     scoring_history = scoring_history[1:]
-                assert_is_type(timestep, "AUTO", "epochs",  "samples", "duration")
+                assert_is_type(timestep, "AUTO", "epochs", "samples", "duration")
                 if timestep == "AUTO":
                     timestep = "epochs"
 
@@ -991,9 +977,8 @@ class ModelBase(backwards_compatible(Keyed)):
             raise H2OValueError("Plotting not implemented for this type of model")
         if not server: plt.show()
 
-
     def partial_plot(self, data, cols=None, destination_key=None, nbins=20, weight_column=None,
-                     plot=True, plot_stddev = True, figsize=(7, 10), server=False, include_na=False, user_splits=None,
+                     plot=True, plot_stddev=True, figsize=(7, 10), server=False, include_na=False, user_splits=None,
                      col_pairs_2dpdp=None, save_to_file=None, row_index=None):
         """
         Create partial dependence plot which gives a graphical depiction of the marginal effect of a variable on the
@@ -1018,47 +1003,47 @@ class ModelBase(backwards_compatible(Keyed)):
         if not isinstance(data, h2o.H2OFrame): raise ValueError("data must be an instance of H2OFrame")
         num_1dpdp = 0
         num_2dpdp = 0
-        if not(cols==None):
+        if not (cols == None):
             assert_is_type(cols, [str])
             num_1dpdp = len(cols)
-        if not(col_pairs_2dpdp==None):
+        if not (col_pairs_2dpdp == None):
             assert_is_type(col_pairs_2dpdp, [[str, str]])
-            num_2dpdp=len(col_pairs_2dpdp)
-            
-        if (cols==None) and (col_pairs_2dpdp==None):
+            num_2dpdp = len(col_pairs_2dpdp)
+
+        if (cols == None) and (col_pairs_2dpdp == None):
             raise ValueError("must specify either cols or col_pairs_2dpd to generate partial dependency plots")
-            
+
         assert_is_type(destination_key, None, str)
         assert_is_type(nbins, int)
         assert_is_type(plot, bool)
         assert_is_type(figsize, (int, int))
 
         # Check cols specified exist in frame data
-        if not(cols==None):
+        if not (cols == None):
             for xi in cols:
                 if xi not in data.names:
                     raise H2OValueError("Column %s does not exist in the training frame" % xi)
-        if not(col_pairs_2dpdp==None):
+        if not (col_pairs_2dpdp == None):
             for oneP in col_pairs_2dpdp:
                 if oneP[0] not in data.names:
                     raise H2OValueError("Column %s does not exist in the training frame" % oneP[0])
                 if oneP[1] not in data.names:
                     raise H2OValueError("Column %s does not exist in the training frame" % oneP[1])
-                if oneP[0]==oneP[1]:
+                if oneP[0] == oneP[1]:
                     raise H2OValueError("2D pdp must be with different columns.")
         if isinstance(weight_column, int) and not (weight_column == -1):
             raise H2OValueError("Weight column should be a column name in your data frame.")
-        elif isinstance(weight_column, str): # index is a name
+        elif isinstance(weight_column, str):  # index is a name
             if weight_column not in data.names:
                 raise H2OValueError("Column %s does not exist in the data frame" % weight_column)
             weight_column = data.names.index(weight_column)
-        
+
         if row_index:
             if not isinstance(row_index, int):
                 raise H2OValueError("Row index should be of type int.")
         else:
             row_index = -1
-        
+
         kwargs = {}
         kwargs["cols"] = cols
         kwargs["model_id"] = self.model_id
@@ -1071,7 +1056,7 @@ class ModelBase(backwards_compatible(Keyed)):
         kwargs["col_pairs_2dpdp"] = col_pairs_2dpdp
 
         self.__generate_user_splits(user_splits, data, kwargs)
-        json = H2OJob(h2o.api("POST /3/PartialDependence/", data=kwargs),  job_type="PartialDependencePlot").poll()
+        json = H2OJob(h2o.api("POST /3/PartialDependence/", data=kwargs), job_type="PartialDependencePlot").poll()
         json = h2o.api("GET /3/PartialDependence/%s" % json.dest_key)
 
         # Extract partial dependence data from json response
@@ -1085,8 +1070,8 @@ class ModelBase(backwards_compatible(Keyed)):
     def __generate_user_splits(self, user_splits, data, kwargs):
         # extract user defined split points from dict user_splits into an integer array of column indices
         # and a double array of user define values for the corresponding columns
-        if not(user_splits == None) and (len(user_splits) > 0):
-            if not(isinstance(user_splits, dict)):
+        if not (user_splits == None) and (len(user_splits) > 0):
+            if not (isinstance(user_splits, dict)):
                 raise H2OValueError("user_splits must be a Python dict.")
             else:
                 user_cols = []
@@ -1094,28 +1079,29 @@ class ModelBase(backwards_compatible(Keyed)):
                 user_num_splits = []
                 data_ncol = data.ncol
                 column_names = data.names
-                for colKey,val in user_splits.items():
+                for colKey, val in user_splits.items():
                     if is_type(colKey, str) and colKey in column_names:
                         user_cols.append(colKey)
                     elif isinstance(colKey, int) and colKey < data_ncol:
                         user_cols.append(column_names[colKey])
                     else:
                         raise H2OValueError("column names/indices used in user_splits are not valid.  They "
-                                                "should be chosen from the columns of your data set.")
+                                            "should be chosen from the columns of your data set.")
 
-                    if data[colKey].isfactor()[0] or data[colKey].isnumeric()[0]: # replace enum string with actual value
+                    if data[colKey].isfactor()[0] or data[colKey].isnumeric()[
+                        0]:  # replace enum string with actual value
                         nVal = len(val)
                         if data[colKey].isfactor()[0]:
                             domains = data[colKey].levels()[0]
 
-                            numVal = [0]*nVal
+                            numVal = [0] * nVal
                             for ind in range(nVal):
                                 if (val[ind] in domains):
                                     numVal[ind] = domains.index(val[ind])
                                 else:
                                     raise H2OValueError("Illegal enum value {0} encountered.  To include missing"
-                                                            " values in your feature values, set include_na to "
-                                                            "True".format(val[ind]))
+                                                        " values in your feature values, set include_na to "
+                                                        "True".format(val[ind]))
 
                             user_values.extend(numVal)
                         else:
@@ -1123,7 +1109,7 @@ class ModelBase(backwards_compatible(Keyed)):
                         user_num_splits.append(nVal)
                     else:
                         raise H2OValueError("Partial dependency plots are generated for numerical and categorical "
-                                                "columns only.")
+                                            "columns only.")
                 kwargs["user_cols"] = user_cols
                 kwargs["user_splits"] = user_values
                 kwargs["num_user_splits"] = user_num_splits
@@ -1135,20 +1121,20 @@ class ModelBase(backwards_compatible(Keyed)):
     def __generate_partial_plots(self, num_1dpdp, num_2dpdp, plot, server, pps, figsize, col_pairs_2dpdp, data, nbins,
                                  user_cols, user_num_splits, plot_stddev, cols, save_to_file):
         # Plot partial dependence plots using matplotlib
-        totFig = num_1dpdp+num_2dpdp
-        if plot and totFig>0:     # plot 1d pdp for now
+        totFig = num_1dpdp + num_2dpdp
+        if plot and totFig > 0:  # plot 1d pdp for now
             plt = _get_matplotlib_pyplot(server)
             if not plt: return pps
             import matplotlib.gridspec as gridspec
             fig = plt.figure(figsize=figsize)
             gxs = gridspec.GridSpec(totFig, 1)
-            if num_2dpdp>0: # 2d pdp requested
+            if num_2dpdp > 0:  # 2d pdp requested
                 axes3D = _get_mplot3d_pyplot("2D partial plots")
                 cm = _get_matplotlib_cm("2D partial plots")
             figPlotted = False  # indicated number of figures plotted
             for i, pp in enumerate(pps):
-                if (i >= num_1dpdp): # plot 2D pdp
-                    if (axes3D==None) or (cm==None) or (plt==None):    # quit if cannot find toolbox
+                if (i >= num_1dpdp):  # plot 2D pdp
+                    if (axes3D == None) or (cm == None) or (plt == None):  # quit if cannot find toolbox
                         break
                     figPlotted = self.__plot_2dpdp(fig, col_pairs_2dpdp, gxs, num_1dpdp, data, pp, nbins, user_cols,
                                                    user_num_splits, plot_stddev, cm, i)
@@ -1160,114 +1146,115 @@ class ModelBase(backwards_compatible(Keyed)):
             else:
                 print("No partial plot is generated and/or saved.  You may be missing toolboxes like "
                       "mpl_toolkits.mplot3d, matplotlib")
-            if (save_to_file is not None) and figPlotted: # only save when a figure is actually plotted
+            if (save_to_file is not None) and figPlotted:  # only save when a figure is actually plotted
                 plt.savefig(save_to_file)
 
-    def __plot_2dpdp(self, fig, col_pairs_2dpdp, gxs, num_1dpdp, data, pp, nbins, user_cols, user_num_splits, plot_stddev, cm, i):
+    def __plot_2dpdp(self, fig, col_pairs_2dpdp, gxs, num_1dpdp, data, pp, nbins, user_cols, user_num_splits,
+                     plot_stddev, cm, i):
         ax = fig.add_subplot(gxs[i], projection='3d')
-        colPairs = col_pairs_2dpdp[i-num_1dpdp]
-        x = self.__grabValues(pp, 0, data, colPairs[0], ax) # change to numpy 2d_array
+        colPairs = col_pairs_2dpdp[i - num_1dpdp]
+        x = self.__grabValues(pp, 0, data, colPairs[0], ax)  # change to numpy 2d_array
         y = self.__grabValues(pp, 1, data, colPairs[1], ax)
-        X,Y,Z = self.__predFor3D(x,y,pp[2], colPairs, nbins, user_cols, user_num_splits)
+        X, Y, Z = self.__predFor3D(x, y, pp[2], colPairs, nbins, user_cols, user_num_splits)
 
-        zupper = [a + b for a, b in zip(pp[2], pp[3]) ]  # pp[1] is mean, pp[2] is std
-        zlower = [a - b for a, b in zip(pp[2], pp[3]) ]
-        _,_,Zupper = self.__predFor3D(x,y,zupper, colPairs, nbins, user_cols, user_num_splits)
-        _,_,Zlower = self.__predFor3D(x,y,zlower, colPairs, nbins, user_cols, user_num_splits)
-        ax.plot_surface(X, Y, Z, cmap=cm.coolwarm,linewidth=1, antialiased=False, alpha=0.5, edgecolor='k')
+        zupper = [a + b for a, b in zip(pp[2], pp[3])]  # pp[1] is mean, pp[2] is std
+        zlower = [a - b for a, b in zip(pp[2], pp[3])]
+        _, _, Zupper = self.__predFor3D(x, y, zupper, colPairs, nbins, user_cols, user_num_splits)
+        _, _, Zlower = self.__predFor3D(x, y, zlower, colPairs, nbins, user_cols, user_num_splits)
+        ax.plot_surface(X, Y, Z, cmap=cm.coolwarm, linewidth=1, antialiased=False, alpha=0.5, edgecolor='k')
         if plot_stddev:
-            ax.plot_surface(X, Y, Zupper, cmap=cm.coolwarm,linewidth=0.2, antialiased=False, alpha=0.3, edgecolor='y')
-            ax.plot_surface(X, Y, Zlower, cmap=cm.coolwarm,linewidth=0.2, antialiased=False, alpha=0.3, edgecolor='g')
+            ax.plot_surface(X, Y, Zupper, cmap=cm.coolwarm, linewidth=0.2, antialiased=False, alpha=0.3, edgecolor='y')
+            ax.plot_surface(X, Y, Zlower, cmap=cm.coolwarm, linewidth=0.2, antialiased=False, alpha=0.3, edgecolor='g')
         ax.set_xlabel(colPairs[0])
         ax.set_xlim(min(x), max(x))
         ax.set_ylabel(colPairs[1])
         ax.set_ylim(min(y), max(y))
         ax.set_zlim(min([min(zupper), min(zlower), min(pp[2])]), max([max(zupper), max(zlower), max(pp[2])]))
         ax.set_zlabel('Partial dependence')
-        titles = '2D partial dependence plot for '+colPairs[0] + ' and '+colPairs[1]
+        titles = '2D partial dependence plot for ' + colPairs[0] + ' and ' + colPairs[1]
         ax.set_title(titles)
         return True
-    
+
     def __plot_1dpdp(self, cols, i, data, pp, fig, gxs, plot_stddev):
         col = cols[i]
         cat = data[col].isfactor()[0]
-        upper = [a + b for a, b in zip(pp[1], pp[2]) ]  # pp[1] is mean, pp[2] is std
-        lower = [a - b for a, b in zip(pp[1], pp[2]) ]
+        upper = [a + b for a, b in zip(pp[1], pp[2])]  # pp[1] is mean, pp[2] is std
+        lower = [a - b for a, b in zip(pp[1], pp[2])]
         axs = fig.add_subplot(gxs[i])
         self.__setAxs1D(axs, upper, lower, plot_stddev, cat, pp, 0, col)  # setup graph, axis, labels and ...
         return True
-        
+
     # change x, y, z to be 2-D numpy arrays in order to plot it.
     # note that, x stays at one value for the duration of y value changes.
     def __predFor3D(self, x, y, z, colPairs, nbins, user_cols, user_num_splits):
         # deal with y axis first
         np = _get_numpy("2D partial plots")
-        if np==None:
+        if np == None:
             print("Numpy not found.  Cannot plot 2D partial plots.")
         ycol = colPairs[1]
         nBins = nbins
         if user_cols is not None and ycol in user_cols:
             ind = user_cols.index(ycol)
             nBins = user_num_splits[ind]
-        nrow = int(len(x)/nBins)
+        nrow = int(len(x) / nBins)
         X = np.transpose(np.array(x).reshape(nrow, nBins))
         Y = np.transpose(np.array(y).reshape(nrow, nBins))
         Z = np.transpose(np.array(z).reshape(nrow, nBins))
-        return X,Y,Z
-    
+        return X, Y, Z
+
     def __grabValues(self, pp, index, data, col, axs):
         cat = data[col].isfactor()[0]
         if cat:
             labels = pp[index]
-            uniqueL =list(set(labels))
+            uniqueL = list(set(labels))
             x = range(len(uniqueL))
-            xlab = [None]*len(uniqueL)
+            xlab = [None] * len(uniqueL)
             for ind in range(len(uniqueL)):
                 xlab[ind] = labels[labels.index(uniqueL[ind])]
 
             # replace string enum labels with integer values
-            xext = [None]*len(labels)
+            xext = [None] * len(labels)
             for ind in range(len(labels)):
                 xext[ind] = labels.index(labels[ind])
-                
-            if index==0:    # x-axis
+
+            if index == 0:  # x-axis
                 axs.set_xticks(x)
                 axs.set_xticklabels(xlab)
-            else:   # y-axis
+            else:  # y-axis
                 axs.set_yticks(x)
                 axs.set_yticklabels(labels)
-            axs.margins(0.2) 
+            axs.margins(0.2)
 
             return xext
         else:
             return pp[index]
-        
+
     def __setAxs1D(self, axs, upper, lower, plot_stddev, cat, pp, pp_start_index, col):
         if cat:
             labels = pp[pp_start_index]  # 1d pdp, this is 0
             x = range(len(labels))
-            y = pp[pp_start_index+1]
+            y = pp[pp_start_index + 1]
             axs.plot(x, y, "ro")
             if plot_stddev:
                 axs.plot(x, lower, 'b--')
                 axs.plot(x, upper, 'b--')
-            axs.set_ylim(min(lower) - 0.1*abs(min(lower)), max(upper) + 0.1*abs(max(upper)))
+            axs.set_ylim(min(lower) - 0.1 * abs(min(lower)), max(upper) + 0.1 * abs(max(upper)))
             axs.set_xticks(x)
             axs.set_xticklabels(labels)
             axs.margins(0.2)
         else:
             x = pp[pp_start_index]
-            y = pp[pp_start_index+1]
+            y = pp[pp_start_index + 1]
             axs.plot(x, y, "r-")
             if plot_stddev:
                 axs.plot(x, lower, 'b--')
                 axs.plot(x, upper, 'b--')
             axs.set_xlim(min(x), max(x))
-            axs.set_ylim(min(lower) - 0.1*abs(min(lower)), max(upper) + 0.1*abs(max(upper)))
-    
+            axs.set_ylim(min(lower) - 0.1 * abs(min(lower)), max(upper) + 0.1 * abs(max(upper)))
+
         axs.set_title("Partial Dependence Plot For {}".format(col))
         axs.set_xlabel(pp.col_header[pp_start_index])
-        axs.set_ylabel(pp.col_header[pp_start_index+1])
+        axs.set_ylabel(pp.col_header[pp_start_index + 1])
         axs.xaxis.grid()
         axs.yaxis.grid()
 
@@ -1333,7 +1320,7 @@ class ModelBase(backwards_compatible(Keyed)):
             ax.yaxis.set_ticks_position("left")
             ax.xaxis.set_ticks_position("bottom")
             plt.yticks(pos[0:num_of_features], feature_labels[0:num_of_features])
-            plt.ylim([min(pos[0:num_of_features])- 1, max(pos[0:num_of_features])+1])
+            plt.ylim([min(pos[0:num_of_features]) - 1, max(pos[0:num_of_features]) + 1])
             # ax.margins(y=0.5)
 
         # check which algorithm was used to select right plot title
@@ -1352,10 +1339,9 @@ class ModelBase(backwards_compatible(Keyed)):
             if not server: plt.show()
         elif self._model_json["algo"] == "glm":
             plt.title("Variable Importance: H2O GLM", fontsize=20)
-            if not server: plt.show()            
+            if not server: plt.show()
         else:
             raise H2OValueError("A variable importances plot is not implemented for this type of model")
-
 
     def std_coef_plot(self, num_of_features=None, server=False):
         """
@@ -1452,7 +1438,7 @@ class ModelBase(backwards_compatible(Keyed)):
         else:
             color_ids = ("Positive", "Negative")
             markers = [plt.Line2D([0, 0], [0, 0], color=color, marker="s", linestyle="")
-                       for color in ['#1F77B4', '#FF7F0E']] # blue should always be positive, orange negative
+                       for color in ['#1F77B4', '#FF7F0E']]  # blue should always be positive, orange negative
             lgnd = plt.legend(markers, color_ids, numpoints=1, loc="best", frameon=False, fontsize=13)
             lgnd.legendHandles[0]._legmarker.set_markersize(10)
             lgnd.legendHandles[1]._legmarker.set_markersize(10)
@@ -1467,12 +1453,11 @@ class ModelBase(backwards_compatible(Keyed)):
         # ax.yaxis.set_ticks_position("left")
         # ax.xaxis.set_ticks_position("bottom")
         plt.yticks(pos[0:num_of_features], feature_labels[0:num_of_features])
-        plt.tick_params(axis="x", which="minor", bottom="off", top="off",  labelbottom="off")
+        plt.tick_params(axis="x", which="minor", bottom="off", top="off", labelbottom="off")
         plt.title("Standardized Coef. Magnitudes: H2O GLM", fontsize=20)
         # plt.axis("tight")
         # show plot
         if not server: plt.show()
-
 
     @staticmethod
     def _check_targets(y_actual, y_predicted):
@@ -1486,7 +1471,6 @@ class ModelBase(backwards_compatible(Keyed)):
         if len(y_actual) != len(y_predicted):
             raise ValueError("Row mismatch: [{},{}]".format(len(y_actual), len(y_predicted)))
 
-
     def cross_validation_models(self):
         """
         Obtain a list of cross-validation models.
@@ -1498,7 +1482,6 @@ class ModelBase(backwards_compatible(Keyed)):
         m = []
         for p in cvmodels: m.append(h2o.get_model(p["name"]))
         return m
-
 
     def cross_validation_predictions(self):
         """
@@ -1514,7 +1497,6 @@ class ModelBase(backwards_compatible(Keyed)):
         for p in preds: m.append(h2o.get_frame(p["name"]))
         return m
 
-
     def cross_validation_holdout_predictions(self):
         """
         Obtain the (out-of-sample) holdout predictions of all cross-validation models on the training data.
@@ -1526,7 +1508,6 @@ class ModelBase(backwards_compatible(Keyed)):
         preds = self._model_json["output"]["cross_validation_holdout_predictions_frame_id"]
         if preds is None: return None
         return h2o.get_frame(preds["name"])
-
 
     def cross_validation_fold_assignment(self):
         """
@@ -1552,13 +1533,10 @@ class ModelBase(backwards_compatible(Keyed)):
         """DEPRECATED. Use :meth:`scoring_history` instead."""
         return self.scoring_history()
 
-
     # Deprecated functions; left here for backward compatibility
     _bcim = {
         "giniCoef": lambda self, *args, **kwargs: self.gini(*args, **kwargs),
     }
-
-
 
 
 def _get_matplotlib_pyplot(server):
@@ -1573,6 +1551,7 @@ def _get_matplotlib_pyplot(server):
         print("`matplotlib` library is required for this function!")
         return None
 
+
 def _get_mplot3d_pyplot(functionName):
     try:
         # noinspection PyUnresolvedReferences
@@ -1582,6 +1561,7 @@ def _get_mplot3d_pyplot(functionName):
         print("`mpl_toolkits.mplot3d` library is required for function {0}!".format(functionName))
         return None
 
+
 def _get_numpy(functionName):
     try:
         import numpy as np
@@ -1590,6 +1570,7 @@ def _get_numpy(functionName):
         print("`numpy` library is required for function {0}!".format(functionName))
         return None
 
+
 def _get_matplotlib_cm(functionName):
     try:
         from matplotlib import cm
@@ -1597,4 +1578,3 @@ def _get_matplotlib_cm(functionName):
     except ImportError:
         print('matplotlib library is required for 3D plots for function {0}'.format(functionName))
         return None
-    
